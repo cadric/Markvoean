@@ -904,4 +904,4 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
 // Note: The include "gtktext_cmark.h" was in the original cmark.c.
 // If it contains definitions specific to the old implementation or general utilities,
 // ensure they are correctly handled or migrated. For a clean cmrender module,
-// it should ideally only depend on its own header, GTK, Adwaita, and cmarklib.
+// it should ideally only depend on its own header, GTK, Adwaita, and cmarklib. 
