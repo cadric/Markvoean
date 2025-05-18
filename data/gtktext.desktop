@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=GTKText
+Comment=A simple text editor with Markdown support
+Icon=gtktext
+Exec=gtktext
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=Markdown;Text;Editor;

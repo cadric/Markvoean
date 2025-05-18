@@ -1,4 +1,5 @@
-# Markvoean
+# GTKText
+
 A simple text editor with Markdown support built with GTK4 and libadwaita.
 
 ## Features
