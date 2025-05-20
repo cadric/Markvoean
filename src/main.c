@@ -3,9 +3,11 @@
 #include <gdk/gdkkeysyms.h>  // For tastatur-konstanter
 
 #include "toolbar.h"
-// #include "markdown.h"  // Tilføjet for at få adgang til markdown-funktionerne
-#include "gtktext_cmark.h" // Switched to gtktext_cmark
+// #include "gtktext_cmark.h" // Switched to gtktext_cmark
+#include "cmrender.h"      // Use the new renderer
 #include "settings.h"
+
+static guint buffer_changed_signal_id = 0; // Store the signal handler ID
 
 // Funktionsdeklarationer
 // static void setup_markdown_tags(GtkTextBuffer *buffer); // Removed duplicate
@@ -29,37 +31,53 @@ static void load_markdown_to_buffer(GtkTextBuffer *buffer) {
     GError *error = NULL;
     g_print("Loading markdown from file: %s\n", filename);
     if (!g_file_get_contents(filename, &content, NULL, &error)) {
-        // If the file doesn't exist, it's not an error, just start with an empty buffer.
-        if (error->code != G_FILE_ERROR_NOENT) {
-            g_warning("Error loading file: %s", error->message);
-        }
+        g_warning("Error loading file: %s", error->message);
         g_clear_error(&error);
-        // Ensure buffer is empty if file not found or on error
-        gtk_text_buffer_set_text(buffer, "", -1);
+        // Optional: Insert some default content or leave buffer empty
+        // gtk_text_buffer_set_text(buffer, "---"Velkommen til Markvoean!\n---"Start med at skrive din Markdown her.", -1);
         return;
     }
     g_print("File contents: %s\n", content);
-    // if (!import_markdown_to_buffer(buffer, content)) {
-    if (!import_markdown_to_buffer_cmark(buffer, content)) { // Changed to cmark version
+    // if (!import_markdown_to_buffer_cmark(buffer, content)) { // Changed to cmark version
+    if (!cm_render_markdown_to_buffer(buffer, content)) { // Use new renderer
         g_warning("Failed to import markdown to buffer");
     } else {
-        g_print("Markdown imported to buffer successfully using cmark.\n");
+        g_print("Markdown imported successfully.\n");
+        // After loading, ensure theme-dependent tags are updated
+        cm_render_update_theme_dependent_tags(buffer);
     }
     g_free(content);
 }
 
 // Saves the content of the GtkTextBuffer to the predefined save file as markdown.
 static void save_buffer_as_markdown(GtkTextBuffer *buffer) {
+    // Ensure buffer is valid before proceeding
+    if (!buffer || !GTK_IS_TEXT_BUFFER(buffer)) { // Corrected G_IS_TEXT_BUFFER
+        g_warning("save_buffer_as_markdown: Invalid text buffer provided.");
+        return;
+    }
     g_autofree gchar *filename = get_save_file_path();
-    // char *md = export_buffer_to_markdown(buffer);
-    char *md = export_buffer_to_markdown_cmark(buffer); // Changed to cmark version
+    if (!filename) {
+        g_warning("Cannot save: Failed to determine save file path");
+        return;
+    }
+    
+    // Get markdown content safely
+    char *md = cm_render_buffer_to_markdown(buffer);
+    if (!md) {
+        g_warning("Cannot save: Failed to convert buffer to markdown");
+        return;
+    }
+    
+    // Save to file
     GError *error = NULL;
     if (!g_file_set_contents(filename, md, -1, &error)) {
         g_warning("Error saving file: %s", error->message);
         g_clear_error(&error);
     } else {
-        g_print("Buffer content saved as markdown to %s using cmark\n", filename);
+        g_print("Buffer saved as markdown to: %s\n", filename);
     }
+    
     g_free(md);
 }
 
@@ -77,11 +95,43 @@ static void on_text_changed(GtkTextBuffer *buffer, G_GNUC_UNUSED gpointer user_d
 }
 
 // Callback triggered when the main window requests to be closed.
-static gboolean on_window_close_request(G_GNUC_UNUSED GtkWindow *window, gpointer user_data) {
+// Change the function signature to match GTK4's close-request signal
+static gboolean on_window_close_request(G_GNUC_UNUSED GtkWindow *window,
+                                        gpointer user_data) {
+    // Ensure text_view is valid before using it
+    if (!user_data || !GTK_IS_TEXT_VIEW(user_data)) {
+        g_warning("on_window_close_request: Invalid text_view (user_data).");
+        return FALSE; // Or handle error appropriately
+    }
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view); // GTK4: Does not return a new ref
+
+    // Ensure buffer is valid after getting it from text_view
+    if (!buffer || !GTK_IS_TEXT_BUFFER(buffer)) { 
+        g_warning("on_window_close_request: Failed to get valid buffer from text_view.");
+        return FALSE; // Or handle error appropriately
+    }
+
+    g_print("on_window_close_request: Preparing to close.\n"); // Corrected newline
+    
+    // Attempt to disconnect the signal handler if it was connected
+    if (buffer_changed_signal_id > 0) {
+        // G_IS_OBJECT(buffer) is implicitly true if GTK_IS_TEXT_BUFFER(buffer) was true
+        if (g_signal_handler_is_connected(buffer, buffer_changed_signal_id)) {
+            g_print("on_window_close_request: Disconnecting 'changed' signal handler (ID: %u) from buffer.\n", 
+                    buffer_changed_signal_id);
+            g_signal_handler_disconnect(buffer, buffer_changed_signal_id);
+        }
+    }
+    buffer_changed_signal_id = 0; // Always reset the ID, marking it as handled/disconnected
+
+    // Save the buffer contents (buffer is guaranteed to be valid if we reached this point)
+    g_print("Saving buffer before closing...\n");
     save_buffer_as_markdown(buffer);
-    return GDK_EVENT_PROPAGATE;
+    g_print("Buffer saved. Allowing default close handling.\n");
+    
+    // Return FALSE to let the default handler proceed with window destruction
+    return FALSE;
 }
 
 // Konverterer valgt tekst til markdown og kopierer til udklipsholderen
@@ -347,9 +397,8 @@ static void app_activate(GApplication *application) {
     g_object_unref(provider);
     
     // Sørg for at builder associeres med window, så vi kan få det fra ethvert widget
-    // der er forbundet med vinduet
-    g_object_set_data(G_OBJECT(window), "builder", builder);
-    g_object_ref(builder); // Hold en reference til builder
+    // der er forbundet med vinduet - Genetablerer den nødvendige reference
+    g_object_set_data_full(G_OBJECT(window), "builder", g_object_ref(builder), g_object_unref);
     
     // Opret toolbar og tilføj til UI
     GtkWidget *toolbar = create_toolbar(text_view);
@@ -367,13 +416,14 @@ static void app_activate(GApplication *application) {
 
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
     load_markdown_to_buffer(buffer);
-    g_signal_connect(buffer, "changed", G_CALLBACK(on_text_changed), NULL);
+    // Store the handler ID so we can disconnect it later if needed
+    buffer_changed_signal_id = g_signal_connect(buffer, "changed", G_CALLBACK(on_text_changed), NULL);
 
     // Tilføj signal for window close
     g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), text_view);
 
     // Når vinduet bliver ødelagt, så frigiv referencen til builder
-    g_signal_connect_swapped(window, "destroy", G_CALLBACK(g_object_unref), builder);
+    // REMOVED: g_signal_connect_swapped(window, "destroy", G_CALLBACK(g_object_unref), builder);
 
     gtk_window_present(GTK_WINDOW(window));
     // Vi frigiver ikke builder her, da vi gemmer en reference i window-objektet

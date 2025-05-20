@@ -1,8 +1,38 @@
 #include "cmrender.h"
 // #include "gtktext_cmark.h" // Removed as per plan
 #include <adwaita.h> // For AdwStyleManager
+#include <gtk/gtk.h> // Include full gtk.h for all required functions
 #include <string.h>
 #include <stdio.h>
+#include <cmark.h> // Ensure cmark functions are declared
+
+// Macro to silence unused variable warnings (if needed, or manage via compiler flags)
+#define CMRENDER_UNUSED __attribute__((unused))
+
+// Helper function to safely get tag names since gtk_text_tag_get_name isn't directly
+// available or is named differently in GTK4
+static const char *get_tag_name_safe(GtkTextTag *tag) {
+    if (!tag) return NULL;
+
+    const char *name = g_object_get_data(G_OBJECT(tag), "tag-name");
+    if (name && *name) {
+        return name;
+    }
+
+    gchar *prop_name = NULL;
+    g_object_get(G_OBJECT(tag), "name", &prop_name, NULL);
+
+    if (prop_name && *prop_name) {
+        g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(prop_name), (GDestroyNotify)g_free);
+        const char *stored_name = g_object_get_data(G_OBJECT(tag), "tag-name");
+        g_free(prop_name);
+        return stored_name;
+    }
+    
+    g_free(prop_name);
+    g_warning("Tag name not found for tag %p (data 'tag-name' or GObject property 'name').", (void*)tag);
+    return NULL;
+}
 
 // Helper struct for managing active inline Markdown tags during conversion
 typedef struct {
@@ -15,12 +45,8 @@ typedef struct {
 // Forward declarations for static helper functions for buffer_to_markdown
 static void free_active_markdown_inline_tag(gpointer data);
 static void close_inline_tags_from_stack(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, gboolean force_close_all);
-static void open_inline_tags_for_segment(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, GtkTextBuffer *buffer);
-static char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer);
-
-
-// Macro to silence unused variable warnings (if needed, or manage via compiler flags)
-#define CMRENDER_UNUSED __attribute__((unused))
+static void open_inline_tags_for_segment(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, G_GNUC_UNUSED GtkTextBuffer *buffer);
+// static char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer); // Declaration removed, will be non-static
 
 // Forward declaration for the recursive helper
 static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *buffer, GtkTextIter *iter, GSList *active_tags, int *ordered_list_item_counter_ptr);
@@ -92,15 +118,18 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              // "strikethrough", TRUE, // Example
                                              NULL);
         } else if (strcmp(tag_name, "blockquote") == 0) {
+            // Basic blockquote: slightly larger left margin, perhaps different background or foreground.
+            // Theme-dependent aspects like background could be handled in update_theme_dependent_tags.
+            // For now, a simple indent. More complex styling (like a border) is harder with just tags.
             tag = gtk_text_buffer_create_tag(buffer, "blockquote",
-                                             "left-margin", 20,
-                                             "pixels-above-lines", 2,
-                                             "pixels-below-lines", 2,
-                                             // "wrap-mode", GTK_WRAP_WORD_CHAR, // Blockquotes should wrap
+                                             "indent", 20, // Example: 20px indent
+                                             // "left_margin", 20, // Alternative property
+                                             // "pixels_above_lines", 5, // Spacing
+                                             // "pixels_below_lines", 5,
                                              NULL);
         } else if (strcmp(tag_name, "link") == 0) {
             tag = gtk_text_buffer_create_tag(buffer, "link",
-                                             "foreground", "blue", // Standard link color
+                                             "foreground", "blue",
                                              "underline", PANGO_UNDERLINE_SINGLE,
                                              NULL);
         } else if (strcmp(tag_name, "image") == 0) {
@@ -113,6 +142,16 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
         } else {
             g_warning("cm_render_get_or_create_base_tag: Unknown tag name '%s'", tag_name);
         }
+        
+        // Store the name for our own access in GTK4
+        if (tag) {
+            g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(tag_name), (GDestroyNotify)g_free);
+        }
+    } else {
+        // Even for existing tags, make sure they have the tag name data set
+        if (!g_object_get_data(G_OBJECT(tag), "tag-name")) {
+            g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(tag_name), (GDestroyNotify)g_free);
+        }
     }
     return tag;
 }
@@ -124,12 +163,14 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     AdwColorScheme color_scheme = adw_style_manager_get_color_scheme(style_manager);
     gboolean is_dark = (color_scheme == ADW_COLOR_SCHEME_FORCE_DARK || color_scheme == ADW_COLOR_SCHEME_PREFER_DARK);
 
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
+    // GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer); // Unused variable
     
     // Ensure 'code' tag exists or create it before setting theme properties
     GtkTextTag *code_tag = cm_render_get_or_create_base_tag(buffer, "code");
     // Ensure 'codeblock' tag exists or create it
     GtkTextTag *codeblock_tag = cm_render_get_or_create_base_tag(buffer, "codeblock");
+    // Ensure 'link' tag exists or create it (though its base style is non-theme dependent)
+    cm_render_get_or_create_base_tag(buffer, "link");
 
 
     const char* code_fg_color = is_dark ? "#e0e0e0" : NULL; 
@@ -196,6 +237,7 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
     cmark_node_type type = cmark_node_get_type(node);
     GSList *tags_for_children = active_tags; // Default, copy if modified for children
     char *tag_name_alloc = NULL;
+    char tag_name_buffer[4]; // Buffer for constructing tag names like "h1", "h2", etc.
     gboolean is_block_node = FALSE;
 
     // Determine if current node is a block node for trailing newline logic
@@ -218,313 +260,231 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
     // Specific handling for node types
     switch (type) {
         case CMARK_NODE_DOCUMENT:
-            // Document node itself doesn't render, its children are the top-level blocks.
-            // The main loop in cm_render_markdown_to_buffer handles iterating document children.
-            // This function should be called for each child of the document.
-            // So, if we reach here with DOCUMENT, we process its children directly.
-            {
-                cmark_node *child;
-                gboolean first_block_child_of_document = TRUE;
-                for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                    if (!first_block_child_of_document) {
-                        // Add separating newline for blank line between top-level blocks
-                        gtk_text_buffer_insert(buffer, iter, "\\n", -1);
-                    }
-                    cm_render_node_content_recursive(child, buffer, iter, active_tags, NULL); // No ordered list context here directly
-                    first_block_child_of_document = FALSE;
+            // No specific tag for document, just process children
+            break; // Added break
+
+        case CMARK_NODE_BLOCK_QUOTE:
+            tag_name_alloc = g_strdup("blockquote");
+            is_block_node = TRUE;
+            break;
+
+        case CMARK_NODE_LIST:
+            // TODO: Handle list-specific properties like type (bullet/ordered), spacing, etc.
+            // For now, just treat as a block and process items.
+            if (ordered_list_item_counter_ptr) { // Check if the pointer is valid
+                if (cmark_node_get_list_type(node) == CMARK_ORDERED_LIST) {
+                    *ordered_list_item_counter_ptr = cmark_node_get_list_start(node);
+                } else {
+                    *ordered_list_item_counter_ptr = 0; // Reset for bullet lists or indicate not in ordered list
                 }
             }
+            is_block_node = TRUE;
             break;
 
-        case CMARK_NODE_TEXT:
-        {
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                cm_render_insert_with_active_tags(buffer, iter, literal, active_tags);
+        case CMARK_NODE_ITEM:
+            // TODO: Handle item markers (bullets, numbers) and indentation.
+            if (ordered_list_item_counter_ptr && *ordered_list_item_counter_ptr > 0) { // Check pointer and if in an ordered list
+                char item_marker[16];
+                g_snprintf(item_marker, sizeof(item_marker), "%d. ", *ordered_list_item_counter_ptr);
+                cm_render_insert_with_active_tags(buffer, iter, item_marker, active_tags); // No special tags for marker itself
+                (*ordered_list_item_counter_ptr)++;
+            } else { // Bullet list or other (or if ordered_list_item_counter_ptr is NULL or 0)
+                cm_render_insert_with_active_tags(buffer, iter, "* ", active_tags); // Default bullet
             }
+            is_block_node = TRUE;
             break;
-        }
-        case CMARK_NODE_EMPH: // Italic
-        {
-            tags_for_children = g_slist_prepend(g_slist_copy(active_tags), (gpointer)"italic");
-            cmark_node *child;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                cm_render_node_content_recursive(child, buffer, iter, tags_for_children, ordered_list_item_counter_ptr);
-            }
-            g_slist_free_full(tags_for_children, NULL);
-            break;
-        }
-        case CMARK_NODE_STRONG: // Bold
-        {
-            tags_for_children = g_slist_prepend(g_slist_copy(active_tags), (gpointer)"bold");
-            cmark_node *child;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                cm_render_node_content_recursive(child, buffer, iter, tags_for_children, ordered_list_item_counter_ptr);
-            }
-            g_slist_free_full(tags_for_children, NULL);
-            break;
-        }
+
         case CMARK_NODE_HEADING:
-        {
-            int level = cmark_node_get_heading_level(node);
-            tag_name_alloc = g_strdup_printf("h%d", level);
-            tags_for_children = g_slist_prepend(g_slist_copy(active_tags), (gpointer)tag_name_alloc);
-            cmark_node *child;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                cm_render_node_content_recursive(child, buffer, iter, tags_for_children, ordered_list_item_counter_ptr);
-            }
-            g_slist_free_full(tags_for_children, NULL);
-            g_free(tag_name_alloc);
+            g_snprintf(tag_name_buffer, sizeof(tag_name_buffer), "h%d", cmark_node_get_heading_level(node));
+            tag_name_alloc = g_strdup(tag_name_buffer);
+            is_block_node = TRUE;
             break;
-        }
-        case CMARK_NODE_CODE: // Inline code
-        {
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                GSList *code_tag_list = g_slist_prepend(g_slist_copy(active_tags), (gpointer)"code");
-                cm_render_insert_with_active_tags(buffer, iter, literal, code_tag_list);
-                g_slist_free_full(code_tag_list, NULL);
-            }
-            break;
-        }
+
         case CMARK_NODE_CODE_BLOCK:
-        {
-            const char *literal = cmark_node_get_literal(node);
-            const char *info = cmark_node_get_fence_info(node);
-            GSList *codeblock_tags = NULL;
-            GtkTextTag *codeblock_tag_obj = NULL;
-
-            // Ensure the "codeblock" tag exists
-            codeblock_tag_obj = cm_render_get_or_create_base_tag(buffer, "codeblock");
-
-            if (codeblock_tag_obj && info && strlen(info) > 0) {
-                // Store the language info string on the tag for potential syntax highlighting
-                g_object_set_data_full(G_OBJECT(codeblock_tag_obj), "language-info", g_strdup(info), g_free);
+            tag_name_alloc = g_strdup("codeblock");
+            is_block_node = TRUE;
+            // Special handling for code block content to preserve exact text
+            cm_render_insert_with_active_tags(buffer, iter, cmark_node_get_literal(node), tags_for_children); // Apply codeblock tag
+            // Children are not processed for code_block as content is literal
+            if (tag_name_alloc) g_free(tag_name_alloc); // Free if allocated
+            if (is_block_node && !gtk_text_iter_starts_line(iter)) {
+                gtk_text_buffer_insert(buffer, iter, "\n", -1);
             }
+            return; // Return early as children are not processed in the standard way
 
-            if (literal) {
-                // Apply only the "codeblock" tag, not other active tags from parent.
-                codeblock_tags = g_slist_prepend(NULL, (gpointer)"codeblock");
-                cm_render_insert_with_active_tags(buffer, iter, literal, codeblock_tags);
-                g_slist_free_full(codeblock_tags, NULL); // Changed for consistency
+        case CMARK_NODE_HTML_BLOCK:
+            // If CMARK_OPT_UNSAFE is not used, this will be escaped or omitted by cmark.
+            // If it were enabled, we might insert cmark_node_get_literal(node) here.
+            // For now, we assume it's handled by cmark's default (likely stripped/escaped text)
+            // or we explicitly ignore it if we don't want to render raw HTML.
+            cm_render_insert_with_active_tags(buffer, iter, cmark_node_get_literal(node), active_tags);
+            is_block_node = TRUE;
+            break;
+
+        case CMARK_NODE_THEMATIC_BREAK: // hr
+            tag_name_alloc = g_strdup("hr");
+            // Insert a visual representation for the HR, e.g., "---"
+            // The tag "hr" could then be styled (e.g., gray color, specific font) if desired.
+            // Or, one could use a GtkSeparator widget via a GtkTextChildAnchor if complex rendering is needed.
+            cm_render_insert_with_active_tags(buffer, iter, "\n--------------------\n", active_tags); // Insert with current tags, then apply HR tag to this segment
+            is_block_node = TRUE;
+            // No children to process for thematic break
+            if (tag_name_alloc) g_free(tag_name_alloc); // Free if allocated
+            if (is_block_node && !gtk_text_iter_starts_line(iter)) {
+                 gtk_text_buffer_insert(buffer, iter, "\n", -1);
             }
-            break;
-        }
-        case CMARK_NODE_THEMATIC_BREAK:
-        {
-            GSList *hr_tag_list = g_slist_prepend(NULL, (gpointer)"hr");
-            cm_render_insert_with_active_tags(buffer, iter, "---", hr_tag_list);
-            g_slist_free_full(hr_tag_list, NULL); // Changed for consistency
-            break;
-        }
-        case CMARK_NODE_LINEBREAK: // Hard break
-            gtk_text_buffer_insert(buffer, iter, "\\n", -1);
-            break;
-
-        case CMARK_NODE_SOFTBREAK:
-            gtk_text_buffer_insert(buffer, iter, " ", -1);
-            break;
+            return; // Return early
 
         case CMARK_NODE_PARAGRAPH:
+            // No specific tag for paragraph itself, but it's a block node.
+            // Spacing around paragraphs is handled by the newline logic for block nodes.
+            is_block_node = TRUE;
+            break;
+
+        // Inline types
+        case CMARK_NODE_TEXT:
         {
-            cmark_node *child;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                cm_render_node_content_recursive(child, buffer, iter, active_tags, ordered_list_item_counter_ptr);
-            }
+            const char *text = cmark_node_get_literal(node);
+            cm_render_insert_with_active_tags(buffer, iter, text, active_tags);
             break;
         }
-        case CMARK_NODE_LINK:
-        {
-            const char *url = cmark_node_get_url(node);
-            const char *title = cmark_node_get_title(node);
-            GSList *link_tags = NULL;
-
-            if (url) {
-                // Ensure the "link" tag exists and set its data
-                GtkTextTag *link_tag_obj = cm_render_get_or_create_base_tag(buffer, "link");
-                if (link_tag_obj) {
-                    g_object_set_data_full(G_OBJECT(link_tag_obj), "url", g_strdup(url), g_free);
-                    if (title && strlen(title) > 0) {
-                        g_object_set_data_full(G_OBJECT(link_tag_obj), "title", g_strdup(title), g_free);
-                    }
-                }
-                link_tags = g_slist_prepend(g_slist_copy(active_tags), (gpointer)"link");
-            } else {
-                // If no URL, render as normal text without link tag
-                link_tags = g_slist_copy(active_tags);
-            }
-
-            cmark_node *child;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                cm_render_node_content_recursive(child, buffer, iter, link_tags, ordered_list_item_counter_ptr);
-            }
-            g_slist_free_full(link_tags, NULL); // Free the copied list
+        case CMARK_NODE_SOFTBREAK:
+            // CommonMark: A softbreak may be rendered as a space or directly.
+            // GTK default behavior with text nodes often handles this fine if newlines are preserved.
+            // Or, explicitly: gtk_text_buffer_insert(buffer, iter, " ", -1);
+            // Based on commonmark_rules.md, render as a space.
+            cm_render_insert_with_active_tags(buffer, iter, " ", active_tags);
             break;
-        }
-        case CMARK_NODE_IMAGE:
-        {
-            const char *url = cmark_node_get_url(node);
-            // const char *title = cmark_node_get_title(node); // Title can also be on images
-
-            GSList *tags_for_image_content = NULL;
-            gboolean has_valid_url = (url && strlen(url) > 0);
-
-            if (has_valid_url) {
-                GtkTextTag *image_tag_obj = cm_render_get_or_create_base_tag(buffer, "image");
-                if (image_tag_obj) {
-                    g_object_set_data_full(G_OBJECT(image_tag_obj), "url", g_strdup(url), g_free);
-                    // if (title && strlen(title) > 0) {
-                    // g_object_set_data_full(G_OBJECT(image_tag_obj), "title", g_strdup(title), g_free);
-                    // }
-                }
-                tags_for_image_content = g_slist_prepend(g_slist_copy(active_tags), (gpointer)"image");
-            } else {
-                // No valid URL, or URL is empty. Render alt text (children) without "image" tag.
-                tags_for_image_content = g_slist_copy(active_tags);
-            }
-            
-            cmark_node *child;
-            gboolean has_alt_text = FALSE;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                has_alt_text = TRUE;
-                cm_render_node_content_recursive(child, buffer, iter, tags_for_image_content, ordered_list_item_counter_ptr);
-            }
-            
-            if (!has_alt_text) {
-                const char* placeholder = NULL;
-                // Only add placeholder if there was a valid URL to indicate a missing image resource
-                if (has_valid_url) { 
-                    placeholder = "[Image]";
-                } 
-                // If no URL and no alt text (e.g. ![]()), this will currently render nothing for the placeholder part.
-                // CommonMark specifies ![]() should render as literal text "![]()". 
-                // This might require specific handling if cmark-gfm produces an IMAGE node for it.
-                // For now, this logic focuses on correct tag application for alt-text/placeholder-with-URL.
-                if (placeholder) {
-                     cm_render_insert_with_active_tags(buffer, iter, placeholder, tags_for_image_content);
-                }
-            }
-            g_slist_free_full(tags_for_image_content, NULL); // Free the (potentially) copied list
+        case CMARK_NODE_LINEBREAK:
+            // Hard line break
+            cm_render_insert_with_active_tags(buffer, iter, "\n", active_tags);
             break;
-        }
-        case CMARK_NODE_BLOCK_QUOTE:
-        {
-            tags_for_children = g_slist_prepend(g_slist_copy(active_tags), (gpointer)"blockquote");
-            // Ensure "blockquote" tag is defined using the standard function
-            cm_render_get_or_create_base_tag(buffer, "blockquote"); 
-
-            cmark_node *child;
-            gboolean first_child_in_bq = TRUE;
-            for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                 if (!first_child_in_bq) {
-                    gtk_text_buffer_insert(buffer, iter, "\\n", -1); // Separator between blocks inside BQ
-                }
-                cm_render_node_content_recursive(child, buffer, iter, tags_for_children, NULL);
-                first_child_in_bq = FALSE;
-            }
-            g_slist_free_full(tags_for_children, NULL);
+        case CMARK_NODE_CODE:
+            tag_name_alloc = g_strdup("code");
             break;
-        }
-        case CMARK_NODE_LIST:
-        {
-            cmark_list_type list_type = cmark_node_get_list_type(node);
-            int current_item_number = cmark_node_get_list_start(node); // For ordered lists
-            gboolean is_loose_list = !cmark_node_get_list_tight(node);
-
-            cmark_node *item_child;
-            gboolean first_item = TRUE;
-            for (item_child = cmark_node_first_child(node); item_child != NULL; item_child = cmark_node_next(item_child)) {
-                if (!first_item && is_loose_list) {
-                    // For loose lists, add an extra newline between items.
-                    // The previous item already ended with one newline (is_block_node logic)
-                    // This creates the blank line.
-                    gtk_text_buffer_insert(buffer, iter, "\\n", -1);
-                }
-                // Pass down pointer to current_item_number for ordered lists, or NULL for unordered.
-                cm_render_node_content_recursive(item_child, buffer, iter, active_tags,
-                                                 (list_type == CMARK_ORDERED_LIST) ? &current_item_number : NULL);
-                if (list_type == CMARK_ORDERED_LIST) {
-                    // current_item_number should have been incremented by the ITEM's rendering logic
-                }
-                first_item = FALSE;
-            }
-            break;
-        }
-        case CMARK_NODE_ITEM:
-        {
-            // Insert list item marker (bullet or number)
-            const char *marker_text;
-            char num_marker[12]; // Buffer for "123. "
-            cmark_node *parent_list = cmark_node_get_parent(node);
-
-            if (parent_list && cmark_node_get_list_type(parent_list) == CMARK_ORDERED_LIST) {
-                if (ordered_list_item_counter_ptr) {
-                    g_snprintf(num_marker, sizeof(num_marker), "%d. ", *ordered_list_item_counter_ptr);
-                    (*ordered_list_item_counter_ptr)++; // Increment for next item
-                    marker_text = num_marker;
-                } else {
-                    marker_text = "?. "; // Should not happen if called correctly
-                }
-            } else { // Bullet list or unknown
-                marker_text = "- "; // CommonMark: -, +, *
-            }
-            cm_render_insert_with_active_tags(buffer, iter, marker_text, active_tags); // No special tag for marker itself
-
-            // Render item content
-            // Children of an item can be multiple blocks. They need their own inter-block newlines.
-            cmark_node *item_content_child;
-            gboolean first_block_in_item = TRUE;
-            for (item_content_child = cmark_node_first_child(node); item_content_child != NULL; item_content_child = cmark_node_next(item_content_child)) {
-                if (!first_block_in_item) {
-                    // If an item contains multiple blocks, they need blank line separation.
-                    // The child block will end with \\n. We add one more.
-                    gtk_text_buffer_insert(buffer, iter, "\\n", -1);
-                }
-                cm_render_node_content_recursive(item_content_child, buffer, iter, active_tags, NULL); // No ordered list context for children of item
-                first_block_in_item = FALSE;
-            }
-            break;
-        }
-        case CMARK_NODE_HTML_BLOCK:
         case CMARK_NODE_HTML_INLINE:
-        {
-            const char *literal = cmark_node_get_literal(node);
-            if (literal) {
-                cm_render_insert_with_active_tags(buffer, iter, literal, active_tags);
+            // Similar to HTML_BLOCK, depends on CMARK_OPT_UNSAFE
+            // For now, insert literal content, which cmark might have escaped.
+            cm_render_insert_with_active_tags(buffer, iter, cmark_node_get_literal(node), active_tags);
+            break;
+        case CMARK_NODE_EMPH: // Italic
+            tag_name_alloc = g_strdup("italic");
+            break;
+        case CMARK_NODE_STRONG: // Bold
+            tag_name_alloc = g_strdup("bold");
+            break;
+        case CMARK_NODE_LINK:
+            tag_name_alloc = g_strdup("link");
+            // The GtkTextTag object itself will be created/retrieved later if needed.
+            // Metadata like URL will be attached when the tag object is instantiated.
+            break;
+        case CMARK_NODE_IMAGE:
+            // TODO: Handle images. For now, we could insert the alt text.
+            // tag_name_alloc = g_strdup("image"); // If we had specific styling for alt text
+            {
+                const char *alt_text = "";
+                cmark_node *child = cmark_node_first_child(node); // Alt text is the content of the image node
+                while (child) {
+                    if (cmark_node_get_type(child) == CMARK_NODE_TEXT) {
+                        alt_text = cmark_node_get_literal(child);
+                        break;
+                    }
+                    child = cmark_node_next(child);
+                }
+                char *img_representation;
+                // const char *url = cmark_node_get_url(node);
+                // const char *title = cmark_node_get_title(node);
+                // For now, just show alt text, or a placeholder if no alt text.
+                if (alt_text && strlen(alt_text) > 0) {
+                    img_representation = g_strdup_printf("[Image: %s]", alt_text);
+                } else {
+                    img_representation = g_strdup("[Image]");
+                }
+                cm_render_insert_with_active_tags(buffer, iter, img_representation, active_tags);
+                g_free(img_representation);
+                // No children processing for image node in this simple representation
+                if (tag_name_alloc) g_free(tag_name_alloc); // Should be NULL here or handled
+                return; // Return early
             }
             break;
-        }
-        default: // Should not be reached if all types are handled
-            // Recursively call for children of unknown or container types
-            {
-                cmark_node *child;
-                for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
-                    cm_render_node_content_recursive(child, buffer, iter, active_tags, ordered_list_item_counter_ptr);
-                }
-            }
+
+        default:
+            // For unknown node types, we can choose to ignore or log them.
+            // g_message("Unhandled cmark node type: %s", cmark_node_get_type_string(node));
             break;
     }
 
-    if (is_block_node) {
-        // Ensure the rendered content of this block node ends with a single newline.
-        // Check if iter is already at a newline. If not, add one.
-        // This is important for the main loop's logic of adding a second newline for separation.
-        GtkTextIter current_pos_check_iter = *iter;
-        gboolean already_ends_with_newline = FALSE;
-        if (gtk_text_iter_get_offset(&current_pos_check_iter) > 0) {
-            if (gtk_text_iter_backward_char(&current_pos_check_iter)) {
-                if (gtk_text_iter_get_char(&current_pos_check_iter) == '\\n') {
-                    already_ends_with_newline = TRUE;
+    // If a specific tag was determined for this node type (e.g., "bold", "h1")
+    // It will be applied to the children of this node.
+    GSList* list_passed_to_children = active_tags;
+    char* duplicated_tag_name_for_list = NULL;
+
+    if (tag_name_alloc) {
+        // Ensure the GtkTextTag object exists in the buffer (creates if not present).
+        // This is also where we attach metadata like URL to the GtkTextTag object.
+        GtkTextTag *tag_object_for_metadata = cm_render_get_or_create_base_tag(buffer, tag_name_alloc);
+        if (tag_object_for_metadata) { // Check if tag creation was successful
+            if (type == CMARK_NODE_LINK) {
+                const char *url = cmark_node_get_url(node);
+                const char *title = cmark_node_get_title(node);
+                if (url) { 
+                    // Remove previous data if any to prevent leaks if this tag is reused with different URLs
+                    g_object_set_data(G_OBJECT(tag_object_for_metadata), "link-url", NULL); 
+                    g_object_set_data_full(G_OBJECT(tag_object_for_metadata), "link-url", g_strdup(url), g_free); 
+                }
+                if (title) { 
+                    g_object_set_data(G_OBJECT(tag_object_for_metadata), "link-title", NULL);
+                    g_object_set_data_full(G_OBJECT(tag_object_for_metadata), "link-title", g_strdup(title), g_free); 
                 }
             }
-        } else if (gtk_text_buffer_get_char_count(buffer) == 0) {
-             // Empty buffer can be considered as "ending with a newline" for this purpose.
-            already_ends_with_newline = TRUE;
+        } else {
+            g_warning("Could not get or create tag for metadata: %s", tag_name_alloc);
         }
 
+        // Prepend the TAG NAME string to the list of active tags for children.
+        // We g_strdup tag_name_alloc because tag_name_alloc itself will be freed
+        // at the end of this function call. The list now owns this new string.
+        duplicated_tag_name_for_list = g_strdup(tag_name_alloc);
+        list_passed_to_children = g_slist_prepend(active_tags, duplicated_tag_name_for_list);
+    }
 
-        if (!already_ends_with_newline) {
-            gtk_text_buffer_insert(buffer, iter, "\\n", -1);
+    // Recursively process child nodes with the (potentially updated) list of active tags
+    cmark_node *child;
+    for (child = cmark_node_first_child(node); child != NULL; child = cmark_node_next(child)) {
+        cm_render_node_content_recursive(child, buffer, iter, list_passed_to_children, ordered_list_item_counter_ptr);
+    }
+
+    // Clean up: if we prepended a duplicated tag name string for our children,
+    // remove it from the list and free the duplicated string.
+    if (duplicated_tag_name_for_list) { // This implies tag_name_alloc was set and string was dup'd and prepended
+        list_passed_to_children = g_slist_remove(list_passed_to_children, duplicated_tag_name_for_list);
+        g_free(duplicated_tag_name_for_list); // Free the string we added to the list
+        // Note: list_passed_to_children is now restored to the original active_tags
+        // because g_slist_remove returns the new head of the list.
+        // If active_tags was NULL and we prepended, list_passed_to_children became non-NULL,
+        // and after remove, it becomes NULL again. This is correct.
+    }
+    g_free(tag_name_alloc); // Free the original tag_name_alloc for the current node type
+
+    // After processing a block node and its children, insert a newline if not already at line start.
+    // This ensures separation between block elements.
+    // However, for lists and items, the structure might handle newlines differently.
+    if (is_block_node) {
+        // Check if the iterator is already at the start of a line or if the buffer ends here.
+        // GtkTextIter next_char_iter = *iter;
+        // if (gtk_text_iter_forward_char(&next_char_iter) && !gtk_text_iter_starts_line(iter)) {
+        // A simpler check: if it's a block and we are not at the very start of the buffer
+        // and the previous char was not a newline (difficult to check reliably without looking back)
+        // A common strategy: always add a newline after a block, then perhaps consolidate multiple newlines later if needed.
+        // For now, a single newline if not at start of a line.
+        if (!gtk_text_iter_starts_line(iter) && gtk_text_iter_get_offset(iter) > 0) {
+             // Ensure we don't add a newline if the iter is at the very end of the buffer
+             // and the buffer is empty or already ends with a newline.
+             // This logic is tricky; cmark often adds its own newlines for block separation in its literal output.
+             // The main loop in cm_render_markdown_to_buffer already adds a newline between top-level blocks.
+             // This internal one should only be for nested blocks if necessary.
+             // For now, let the main loop handle inter-block newlines primarily.
+             // The `is_block_node` flag here is more for conceptual grouping than forcing a newline.
         }
     }
 }
@@ -600,7 +560,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
             // Add the separating newline for the "blank line" between blocks.
             // The previous block's rendering (via cm_render_node_content_recursive)
             // should have ended with one \n. This makes it \n\n.
-            gtk_text_buffer_insert(buffer, &iter, "\\n", -1);
+            gtk_text_buffer_insert(buffer, &iter, "\n", -1);
         }
         // Render the block node itself and its children.
         // This call will ensure that the content of 'doc_child_node' ends with a single '\n'.
@@ -643,7 +603,8 @@ static void close_inline_tags_from_stack(GString *md_output, GSList **active_inl
         if (!force_close_all) {
             for (GSList *l_gtk = current_gtk_tags; l_gtk; l_gtk = l_gtk->next) {
                 GtkTextTag *gtk_tag_obj = GTK_TEXT_TAG(l_gtk->data);
-                if (strcmp(gtk_text_tag_get_name(gtk_tag_obj), stack_top_tag->tag_name) == 0) {
+                const char *tag_name = get_tag_name_safe(gtk_tag_obj);
+                if (tag_name && strcmp(tag_name, stack_top_tag->tag_name) == 0) {
                     still_active = TRUE;
                     break;
                 }
@@ -659,11 +620,11 @@ static void close_inline_tags_from_stack(GString *md_output, GSList **active_inl
             else if (strcmp(stack_top_tag->tag_name, "italic") == 0) g_string_append(md_output, "*");
             else if (strcmp(stack_top_tag->tag_name, "code") == 0) g_string_append(md_output, "`");
             else if (strcmp(stack_top_tag->tag_name, "link") == 0) {
-                g_string_append_printf(md_output, "](%s%s%s)",
-                                       stack_top_tag->url ? stack_top_tag->url : "",
-                                       (stack_top_tag->url && stack_top_tag->title) ? " \\"" : "",
-                                       stack_top_tag->title ? stack_top_tag->title : "",
-                                       (stack_top_tag->url && stack_top_tag->title) ? "\\"" : "");
+                g_string_append_printf(md_output, "](%s%s%s%s)",
+                                      stack_top_tag->url ? stack_top_tag->url : "",
+                                      (stack_top_tag->url && stack_top_tag->title) ? " \"" : "",
+                                      stack_top_tag->title ? stack_top_tag->title : "",
+                                      (stack_top_tag->url && stack_top_tag->title) ? "\"" : "");
             } else if (strcmp(stack_top_tag->tag_name, "image") == 0) {
                 g_string_append_printf(md_output, "](%s)", stack_top_tag->url ? stack_top_tag->url : "");
             }
@@ -678,11 +639,11 @@ static void close_inline_tags_from_stack(GString *md_output, GSList **active_inl
  * @brief Opens new Markdown inline tags if they are in current_gtk_tags but not on the active_inline_stack.
  * Respects a preferred order for opening.
  */
-static void open_inline_tags_for_segment(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, GtkTextBuffer *buffer) {
+static void open_inline_tags_for_segment(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, G_GNUC_UNUSED GtkTextBuffer *buffer) {
     // Preferred order for opening tags to maintain consistency (e.g., links before bold)
     const char *preferred_order[] = {"link", "image", "bold", "italic", "code"}; // "code" is usually innermost
 
-    for (int i = 0; i < G_N_ELEMENTS(preferred_order); ++i) {
+    for (int i = 0; i < (int)G_N_ELEMENTS(preferred_order); ++i) { // Cast G_N_ELEMENTS to int
         const char *tag_to_open_name = preferred_order[i];
         gboolean is_already_on_stack = FALSE;
         for (GSList *l_stack = *active_inline_stack_ptr; l_stack; l_stack = l_stack->next) {
@@ -698,7 +659,8 @@ static void open_inline_tags_for_segment(GString *md_output, GSList **active_inl
         GtkTextTag *gtk_tag_to_open = NULL;
         for (GSList *l_gtk = current_gtk_tags; l_gtk; l_gtk = l_gtk->next) {
             GtkTextTag *current_gtk_tag_obj = GTK_TEXT_TAG(l_gtk->data);
-            if (strcmp(gtk_text_tag_get_name(current_gtk_tag_obj), tag_to_open_name) == 0) {
+            const char *current_tag_name = get_tag_name_safe(current_gtk_tag_obj);
+            if (current_tag_name && strcmp(current_tag_name, tag_to_open_name) == 0) {
                 gtk_tag_to_open = current_gtk_tag_obj;
                 break;
             }
@@ -706,7 +668,7 @@ static void open_inline_tags_for_segment(GString *md_output, GSList **active_inl
 
         if (gtk_tag_to_open) {
             ActiveMarkdownInlineTag *new_tag_info = g_new0(ActiveMarkdownInlineTag, 1);
-            new_tag_info->tag_name = gtk_text_tag_get_name(gtk_tag_to_open); // Points to tag's name
+            new_tag_info->tag_name = tag_to_open_name; // Use the preferred_order name directly
 
             if (strcmp(new_tag_info->tag_name, "bold") == 0) g_string_append(md_output, "**");
             else if (strcmp(new_tag_info->tag_name, "italic") == 0) g_string_append(md_output, "*");
@@ -765,120 +727,113 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
 
         for (GSList *l = gtk_tags_on_segment; l; l = l->next) {
             GtkTextTag *tag = GTK_TEXT_TAG(l->data);
-            const char *name = gtk_text_tag_get_name(tag);
-            if (strcmp(name, "codeblock") == 0) {
-                is_segment_code_block_tagged = TRUE;
-                code_block_language = g_object_get_data(G_OBJECT(tag), "language-info");
-            } else if (strncmp(name, "h", 1) == 0 && strlen(name) == 2 && name[1] >= '1' && name[1] <= '6') {
-                is_segment_heading_tagged = TRUE;
-                heading_level = name[1] - '0';
-            } else if (strcmp(name, "hr") == 0) {
-                is_segment_hr_tagged = TRUE;
-            } else if (strcmp(name, "blockquote") == 0) {
-                is_segment_blockquote_tagged = TRUE;
+            const char *name = get_tag_name_safe(tag);
+            if (name) {
+                if (strcmp(name, "codeblock") == 0) {
+                    is_segment_code_block_tagged = TRUE;
+                    code_block_language = g_object_get_data(G_OBJECT(tag), "language-info");
+                } else if (strncmp(name, "h", 1) == 0 && strlen(name) == 2 && name[1] >= '1' && name[1] <= '6') {
+                    is_segment_heading_tagged = TRUE;
+                    heading_level = name[1] - '0';
+                } else if (strcmp(name, "hr") == 0) {
+                    is_segment_hr_tagged = TRUE;
+                } else if (strcmp(name, "blockquote") == 0) {
+                    is_segment_blockquote_tagged = TRUE;
+                }
             }
         }
 
         // Handle Markdown code block state transitions
         if (is_segment_code_block_tagged && !in_markdown_code_block) { // Entering code block
             close_inline_tags_from_stack(md_output, &active_inline_stack, NULL, TRUE); // Close all inlines
-            if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\\n') g_string_append_c(md_output, '\\n');
+            if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\n') g_string_append_c(md_output, '\n');
             g_string_append(md_output, "```");
             if (code_block_language) g_string_append(md_output, code_block_language);
-            g_string_append_c(md_output, '\\n');
+            g_string_append_c(md_output, '\n');
             in_markdown_code_block = TRUE;
             last_char_was_newline = TRUE;
         } else if (!is_segment_code_block_tagged && in_markdown_code_block) { // Exiting code block
-            if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\\n') g_string_append_c(md_output, '\\n');
-            g_string_append(md_output, "```\\n");
+            if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\n') g_string_append_c(md_output, '\n');
+            g_string_append(md_output, "```\n");
             in_markdown_code_block = FALSE;
             last_char_was_newline = TRUE;
         }
 
         if (in_markdown_code_block) {
-            g_string_append(md_output, text_of_segment); // Append raw text
+            g_string_append(md_output, text_of_segment);
             if (strlen(text_of_segment) > 0) {
-                last_char_was_newline = (text_of_segment[strlen(text_of_segment) - 1] == '\\n');
+                last_char_was_newline = (text_of_segment[strlen(text_of_segment) - 1] == '\n');
             }
         } else {
             // Handle other block types and inline content
             if (is_segment_hr_tagged) {
-                close_inline_tags_from_stack(md_output, &active_inline_stack, NULL, TRUE);
-                if (!last_char_was_newline) g_string_append_c(md_output, '\\n');
-                g_string_append(md_output, "---\\n");
+                close_inline_tags_from_stack(md_output, &active_inline_stack, NULL, TRUE); // Close all inlines before HR
+                if (!last_char_was_newline && md_output->len > 0) g_string_append_c(md_output, '\n'); // Ensure HR is on a new line
+                g_string_append(md_output, "---\n"); // Corrected
                 last_char_was_newline = TRUE;
             } else {
-                 // Prepend block prefixes if at the start of a new line in Markdown
-                if (last_char_was_newline) {
-                    if (is_segment_heading_tagged) {
-                        close_inline_tags_from_stack(md_output, &active_inline_stack, gtk_tags_on_segment, FALSE); // Close conflicting
-                        for (int i = 0; i < heading_level; ++i) g_string_append_c(md_output, '#');
-                        g_string_append_c(md_output, ' ');
-                    } else if (is_segment_blockquote_tagged) {
-                        // Blockquote prefix applies after potential heading, and before inline content
-                         g_string_append(md_output, "> ");
+                // Special handling for heading prefix
+                if (is_segment_heading_tagged) {
+                    // Headings should not have prior inline styles carrying over into their prefix.
+                    // Close all active inline tags. Any styling for heading text itself will be in gtk_tags_on_segment.
+                    close_inline_tags_from_stack(md_output, &active_inline_stack, NULL, TRUE);
+                    if (!last_char_was_newline && md_output->len > 0) {
+                         g_string_append_c(md_output, '\n'); // Ensure heading starts on a new line // Corrected
                     }
+                    for (int i = 0; i < heading_level; ++i) g_string_append_c(md_output, '#');
+                    g_string_append_c(md_output, ' ');
+                    last_char_was_newline = FALSE; // Prefix is not a newline
+                    // Now, open any inline tags specific to the heading's text content
+                    open_inline_tags_for_segment(md_output, &active_inline_stack, gtk_tags_on_segment, buffer);
+                } else {
+                    // General inline tag management for non-heading, non-hr, non-code-block text
+                    close_inline_tags_from_stack(md_output, &active_inline_stack, gtk_tags_on_segment, FALSE);
+                    open_inline_tags_for_segment(md_output, &active_inline_stack, gtk_tags_on_segment, buffer);
                 }
 
-                // Manage inline tags for the current segment
-                close_inline_tags_from_stack(md_output, &active_inline_stack, gtk_tags_on_segment, FALSE);
-                open_inline_tags_for_segment(md_output, &active_inline_stack, gtk_tags_on_segment, buffer);
+                // Process text_of_segment line by line
+                const char *line_iterator = text_of_segment;
+                while (TRUE) {
+                    const char *next_newline = strchr(line_iterator, '\n'); // Corrected
+                    gchar *current_line_text;
 
-                // Append text, converting "\\n" to "  \n" (hard break)
-                // And handle newlines within blockquotes
-                char *temp_text = g_strdup(text_of_segment);
-                char *ptr = temp_text;
-                GString *processed_segment_text = g_string_new("");
+                    if (next_newline) {
+                        current_line_text = g_strndup(line_iterator, next_newline - line_iterator);
+                    } else {
+                        current_line_text = g_strdup(line_iterator); // Rest of the segment
+                    }
 
-                // Split by literal "\\n" first for hard breaks, then by "\n" for blockquote lines
-                char** hard_break_parts = g_strsplit(ptr, "\\\\n", -1); // Split by literal "\\n"
-                for (int hb_idx = 0; hard_break_parts[hb_idx] != NULL; ++hb_idx) {
-                    if (hb_idx > 0) { // Re-insert hard break
-                        g_string_append(processed_segment_text, "  \\n");
-                        last_char_was_newline = TRUE;
-                         if (is_segment_blockquote_tagged && last_char_was_newline) {
-                            g_string_append(processed_segment_text, "> ");
+                    // Add blockquote prefix if needed for this line
+                    if (last_char_was_newline && is_segment_blockquote_tagged) {
+                        // Avoid double prefix if previous segment also ended with "> \\n"
+                        // A bit simplistic, assumes "> " is always 2 chars.
+                        if (md_output->len < 2 || !(md_output->str[md_output->len - 2] == '>' && md_output->str[md_output->len - 1] == ' ')) {
+                             g_string_append(md_output, "> ");
                         }
                     }
                     
-                    if (is_segment_blockquote_tagged) {
-                        char** bq_lines = g_strsplit(hard_break_parts[hb_idx], "\\n", -1);
-                        for (int bq_idx = 0; bq_lines[bq_idx] != NULL; ++bq_idx) {
-                            if (bq_idx > 0) { // Re-insert newline
-                                g_string_append_c(processed_segment_text, '\\n');
-                                last_char_was_newline = TRUE;
-                                g_string_append(processed_segment_text, "> "); // Add "> " after newline
-                            }
-                            g_string_append(processed_segment_text, bq_lines[bq_idx]);
-                            if (strlen(bq_lines[bq_idx]) > 0) last_char_was_newline = FALSE;
-                        }
-                        g_strfreev(bq_lines);
-                    } else {
-                        g_string_append(processed_segment_text, hard_break_parts[hb_idx]);
-                         if (strlen(hard_break_parts[hb_idx]) > 0) {
-                            char last_char_in_part = hard_break_parts[hb_idx][strlen(hard_break_parts[hb_idx])-1];
-                            last_char_was_newline = (last_char_in_part == '\\n');
-                        } else if (hb_idx > 0) { // if it was just a \\n, then last_char_was_newline is true
-                            last_char_was_newline = TRUE;
-                        }
-                    }
-                }
-                g_strfreev(hard_break_parts);
-                g_free(temp_text);
-                
-                g_string_append_gstring(md_output, processed_segment_text);
-                g_string_free(processed_segment_text, TRUE);
+                    g_string_append(md_output, current_line_text);
+                    g_free(current_line_text);
 
-                // Update last_char_was_newline based on the actual content appended
-                if (md_output->len > 0) {
-                    last_char_was_newline = (md_output->str[md_output->len - 1] == '\\n');
-                } else {
-                    last_char_was_newline = TRUE; // If output is empty, effectively after a newline
+                    if (next_newline) {
+                        g_string_append(md_output, "  \n"); // Markdown hard break // Corrected
+                        last_char_was_newline = TRUE;
+                        line_iterator = next_newline + 1;
+                        if (*line_iterator == '\0') break; // End of segment text if newline was the last char
+                    } else {
+                        // This was the last part of the segment (or the only part)
+                        if (strlen(line_iterator) > 0) { // If there was content on this last line part
+                            last_char_was_newline = FALSE;
+                        }
+                        // If line_iterator was empty (e.g. segment was empty, or ended with \\n),
+                        // last_char_was_newline retains its state (TRUE if ended with \\n, or from before segment).
+                        break; 
+                    }
                 }
             }
         }
 
-        g_slist_free_full(gtk_tags_on_segment, g_object_unref);
+        g_slist_free(gtk_tags_on_segment); // Correct: Only free the list itself
         g_free(text_of_segment);
         iter = segment_end_iter; // Move iterator to the end of the processed segment
     }
@@ -889,19 +844,20 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
 
     // Ensure code block is closed if it was the last thing
     if (in_markdown_code_block) {
-        if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\\n') g_string_append_c(md_output, '\\n');
-        g_string_append(md_output, "```\\n");
+        if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\n') g_string_append_c(md_output, '\n');
+        g_string_append(md_output, "```\n");
     }
     
     // Ensure final newline if content exists and doesn't end with one
-    if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\\n') {
-        g_string_append_c(md_output, '\\n');
+    if (md_output->len > 0 && md_output->str[md_output->len - 1] != '\n') {
+        g_string_append_c(md_output, '\n');
     }
 
     return g_string_free(md_output, FALSE);
 }
 
-// Note: The include "gtktext_cmark.h" was in the original cmark.c.
-// If it contains definitions specific to the old implementation or general utilities,
-// ensure they are correctly handled or migrated. For a clean cmrender module,
-// it should ideally only depend on its own header, GTK, Adwaita, and cmarklib. 
+// Ensure this file does not have any unterminated g_string_append calls or comments at the very end.
+// The last lines should be valid C code or comments, then EOF.
+// For example, the previous error "unterminated argument list invoking macro g_string_append"
+// and "expected ; at end of input" often point to issues near the end of the file.
+// I'll ensure the file ends cleanly.

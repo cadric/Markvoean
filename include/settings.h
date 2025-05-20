@@ -3,7 +3,7 @@
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include "gtktext_cmark.h"
+#include "cmrender.h"
 
 #ifdef __cplusplus
 extern "C" {

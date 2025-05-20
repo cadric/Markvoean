@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
 #include "toolbar.h"
-#include "gtktext_cmark.h"
+#include "cmrender.h"  // Updated to use the new renderer
+#include "tag_util.h"  // For ensure_tag_name_stored
 
 /* Knap callbacks */
 static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
@@ -17,6 +18,7 @@ static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer u
         italic_tag = gtk_text_buffer_create_tag(buffer, "italic", 
                                             "style", PANGO_STYLE_ITALIC, 
                                             NULL);
+        ensure_tag_name_stored(italic_tag, "italic");
     }
     
     if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
@@ -56,6 +58,7 @@ static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
         bold_tag = gtk_text_buffer_create_tag(buffer, "bold", 
                                           "weight", PANGO_WEIGHT_BOLD, 
                                           NULL);
+        ensure_tag_name_stored(bold_tag, "bold");
     }
     
     if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
@@ -92,13 +95,14 @@ static void on_hr_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_
     GtkTextTag *hr_tag = gtk_text_tag_table_lookup(tag_table, "hr");
     
     // Opret tag hvis det ikke findes
+    // Ensure hr_tag is created and name stored if it doesn't exist
     if (!hr_tag) {
-        hr_tag = gtk_text_buffer_create_tag(buffer, "hr", 
-                                         "paragraph-background", "#ddd",
-                                         "paragraph-background-set", TRUE,
-                                         "pixels-above-lines", 10,
-                                         "pixels-below-lines", 10,
-                                         NULL);
+        hr_tag = gtk_text_buffer_create_tag(buffer, "hr",
+                                            "editable", FALSE,
+                                            // "foreground", "gray", // Example: style for HR
+                                            // "paragraph-background", "#f0f0f0",
+                                            NULL);
+        ensure_tag_name_stored(hr_tag, "hr");
     }
     
     // Få current cursor position mark
@@ -168,6 +172,7 @@ static void on_heading_button_clicked(GtkButton *button, gpointer user_data) {
                                                       "weight", PANGO_WEIGHT_BOLD,
                                                       "scale", size_factor,
                                                       NULL);
+                ensure_tag_name_stored(heading_tag, tag_name);
             }
             
             // Anvend tag
