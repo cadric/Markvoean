@@ -1,4 +1,5 @@
 #include <gtk/gtk.h>
+#include <glib/gi18n.h>
 #include "toolbar.h"
 #include "cmrender.h"  // Updated to use the new renderer
 #include "tag_util.h"  // For ensure_tag_name_stored
@@ -40,7 +41,7 @@ static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer u
             gtk_text_buffer_apply_tag(buffer, italic_tag, &start, &end);
         }
     } else {
-        g_print("Ingen tekst markeret for kursiv\n");
+        g_message("%s", _("No text selected for italic"));
     }
 }
 
@@ -80,7 +81,7 @@ static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
             gtk_text_buffer_apply_tag(buffer, bold_tag, &start, &end);
         }
     } else {
-        g_print("Ingen tekst markeret for fed skrift\n");
+        g_message("%s", _("No text selected for bold"));
     }
 }
 
@@ -177,10 +178,10 @@ static void on_heading_button_clicked(GtkButton *button, gpointer user_data) {
             
             // Anvend tag
             gtk_text_buffer_apply_tag(buffer, heading_tag, &start, &end);
-            g_print("Anvendt h%d formatering\n", level);
+            g_message("Applied heading H%d", level);
         }
     } else {
-        g_print("Ingen tekst markeret for overskrift\n");
+        g_message("%s", _("No text selected for heading"));
     }
     
     // Gem popup hvis vi er i et popover menu
@@ -238,7 +239,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
             toolbar_container = GTK_WIDGET(gtk_builder_get_object(builder, "toolbar_container"));
             
             if (toolbar_container) {
-                g_print("Fandt toolbar_container fra UI\n");
+                g_debug("Found toolbar_container from UI");
             } else {
                 // Hvis vi ikke kan finde containeren, forsøg at finde den på en anden måde
                 toolbar_container = GTK_WIDGET(gtk_widget_get_first_child(
@@ -246,17 +247,17 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
                 
                 if (GTK_IS_BOX(toolbar_container) && 
                     gtk_widget_has_css_class(toolbar_container, "toolbar")) {
-                    g_print("Fandt toolbar_container via widget hierarki\n");
+                    g_debug("Found toolbar_container via widget hierarchy");
                 } else {
                     toolbar_container = NULL;
-                    g_warning("Kunne ikke finde toolbar_container i UI\n");
+                    g_warning("Could not find toolbar_container in UI");
                 }
             }
         } else {
-            g_warning("Ingen builder fundet i parent_window\n");
+            g_warning("No builder found in parent_window");
         }
     } else {
-        g_warning("Intet parent_window fundet for text_view\n");
+        g_warning("No parent_window found for text_view");
     }
     
     // Hvis vi stadig ikke har en container, opret et fallback
@@ -282,7 +283,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
                 if (GTK_IS_BOX(box_container)) {
                     // Indsæt vores toolbar først i box containeren
                     gtk_box_prepend(GTK_BOX(box_container), toolbar_container);
-                    g_print("Tilføjede ny toolbar container til window\n");
+                    g_debug("Added new toolbar container to window");
                 } else {
                     g_critical("Unexpected widget hierarchy in window\n");
                 }
@@ -365,7 +366,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     }
     
     // Debug udskrift
-    g_print("Toolbar oprettet med %d knapper\n", 
+    g_message("Toolbar created with %d buttons", 
         g_list_model_get_n_items(gtk_widget_observe_children(toolbar_container)));
     
     return toolbar_container;

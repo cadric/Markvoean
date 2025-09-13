@@ -1,0 +1,36 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include/gtk-4.0",
+                "/usr/include/pango-1.0",
+                "/usr/include/harfbuzz",
+                "/usr/include/gdk-pixbuf-2.0",
+                "/usr/include/cairo",
+                "/usr/include/graphene-1.0",
+                "/usr/lib64/graphene-1.0/include",
+                "/usr/include/glib-2.0",
+                "/usr/lib64/glib-2.0/include",
+                "/usr/include/libadwaita-1",
+                "/usr/include/libsoup-3.0"
+            ],
+            "defines": [
+                "PKGDATADIR=\"/usr/local/share/gtktext\"",
+                "GETTEXT_PACKAGE=\"gtktext\"",
+                "LOCALEDIR=\"/usr/local/share/locale\"",
+                "HAVE_LIBSOUP=1",
+                "_FORTIFY_SOURCE=2"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "$(pkg-config --cflags gtk4 libadwaita-1 libcmark)"
+            ]
+        }
+    ],
+    "version": 4
+}

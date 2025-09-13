@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gtk.gtktext" path="/org/gtk/gtktext/">
+    <key name="autosave-delay-ms" type="u">
+      <default>500</default>
+      <summary>Autosave delay in milliseconds</summary>
+      <description>
+        The idle delay after the last edit before autosaving the current
+        document to disk. Use 0 to disable debounced autosave and save immediately.
+      </description>
+    </key>
+  </schema>
+  <!-- Keep schema id and path in sync with application code and install path. -->
+  <!-- Installed to: share/glib-2.0/schemas/org.gtk.gtktext.gschema.xml -->
+</schemalist>

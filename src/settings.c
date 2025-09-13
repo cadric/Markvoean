@@ -1,5 +1,6 @@
 #include <adwaita.h>
 #include <gtk/gtk.h>
+#include <glib/gi18n.h>
 
 #include "settings.h"
 
@@ -27,9 +28,31 @@ AdwDialog* create_settings_window(GtkWindow *parent) {
     
     GtkWidget *group_widget = adw_preferences_group_new();
     AdwPreferencesGroup *group = ADW_PREFERENCES_GROUP(group_widget);
-    adw_preferences_group_set_title(group, "Indstillinger");
-    adw_preferences_group_set_description(group, "Her kommer indstillinger i en fremtidig version");
-    
+    adw_preferences_group_set_title(group, _("Preferences"));
+
+    // Autosave delay setting
+    GtkWidget *row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), _("Autosave delay"));
+    // Optional subtitle; commented out for broader libadwaita compatibility
+    // adw_action_row_set_subtitle(ADW_ACTION_ROW(row), _("Milliseconds idle before saving"));
+
+    GtkAdjustment *adj = gtk_adjustment_new(500.0, 0.0, 10000.0, 100.0, 500.0, 0.0);
+    GtkWidget *spin = gtk_spin_button_new(adj, 100.0, 0);
+    gtk_widget_set_valign(spin, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(row), spin);
+    gtk_widget_set_hexpand(spin, FALSE);
+
+    // Bind to GSettings key if schema is available
+    GSettings *settings = g_settings_new("org.gtk.gtktext");
+    if (settings) {
+        // Try to get and set the current value, using default if key doesn't exist
+        guint current = g_settings_get_uint(settings, "autosave-delay-ms");
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), current);
+        g_settings_bind(settings, "autosave-delay-ms", spin, "value", G_SETTINGS_BIND_DEFAULT);
+        g_object_unref(settings);
+    }
+
+    adw_preferences_group_add(group, row);
     adw_preferences_page_add(page, group);
     adw_preferences_dialog_add(ADW_PREFERENCES_DIALOG(dialog), page);
     

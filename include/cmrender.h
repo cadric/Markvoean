@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 #include <cmark.h> // For cmark_node, etc.
+#include <libsoup/soup.h> // For SoupSession
 
 /**
  * @brief Renders CommonMark text into a GtkTextBuffer.
@@ -10,12 +11,16 @@
  * Clears the buffer and then parses the markdown_text, applying
  * appropriate GtkTextTags for styling. Theme-dependent styling
  * for elements like code blocks is applied after parsing.
+ * For images, creates GtkPicture widgets that immediately start fetching.
  *
  * @param buffer The GtkTextBuffer to render into.
  * @param markdown_text The CommonMark text to parse and render.
+ * @param text_view The GtkTextView where image widgets will be embedded.
+ * @param soup_session SoupSession for fetching remote images.
  * @return TRUE on success, FALSE on failure (e.g., invalid input, parse error).
  */
-gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdown_text);
+gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdown_text, 
+                                      GtkTextView *text_view, SoupSession *soup_session);
 
 /**
  * @brief Updates theme-dependent GtkTextTags in the buffer.
