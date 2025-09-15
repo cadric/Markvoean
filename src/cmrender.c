@@ -1,7 +1,7 @@
 /* [0.2.0] - 2025-09-15 - src/cmrender.c
  * Changed: Added proper input validation with g_return_if_fail().
  */
-#include "cmrender.h"
+#include <gtktext/cmrender.h>
 // #include "gtktext_cmark.h" // Removed as per plan
 #include <adwaita.h> // For AdwStyleManager
 #include <gtk/gtk.h> // Include full gtk.h for all required functions
@@ -279,7 +279,7 @@ static GtkWidget *create_image_widget(const char *alt_text, const char *url,
     gtk_box_append(GTK_BOX(box), picture);
     
     // Add caption if provided
-    if (alt_text && strlen(alt_text) > 0) {
+    if (alt_text && g_utf8_strlen(alt_text, -1) > 0) {
         GtkWidget *caption = gtk_label_new(alt_text);
         gtk_widget_add_css_class(caption, "caption");
         gtk_widget_add_css_class(caption, "dim-label");
@@ -377,11 +377,11 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
 
     // 3) Create when missing
     if (!tag) {
-        if (strcmp(tag_name, "bold") == 0) {
+        if (g_strcmp0(tag_name, "bold") == 0) {
             tag = gtk_text_buffer_create_tag(buffer, "bold", "weight", PANGO_WEIGHT_BOLD, NULL);
-        } else if (strcmp(tag_name, "italic") == 0) {
+        } else if (g_strcmp0(tag_name, "italic") == 0) {
             tag = gtk_text_buffer_create_tag(buffer, "italic", "style", PANGO_STYLE_ITALIC, NULL);
-        } else if (strncmp(tag_name, "h", 1) == 0 && strlen(tag_name) == 2 && tag_name[1] >= '1' && tag_name[1] <= '6') {
+        } else if (g_str_has_prefix(tag_name, "h") && g_utf8_strlen(tag_name, -1) == 2 && tag_name[1] >= '1' && tag_name[1] <= '6') {
             int level = tag_name[1] - '0';
             double scale = 1.0;
             switch (level) {
@@ -396,7 +396,7 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              "weight", PANGO_WEIGHT_BOLD,
                                              "scale", scale,
                                              NULL);
-        } else if (strcmp(tag_name, "code") == 0) {
+        } else if (g_strcmp0(tag_name, "code") == 0) {
             // Basic properties for inline code
             tag = gtk_text_buffer_create_tag(buffer, "code",
                                              "family", "monospace",
@@ -406,7 +406,7 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              "pixels-above-lines", 1,
                                              "pixels-below-lines", 1,
                                              NULL);
-        } else if (strcmp(tag_name, "codeblock") == 0) {
+        } else if (g_strcmp0(tag_name, "codeblock") == 0) {
             // Basic properties for fenced code blocks — visual colors are set by theme update.
             // Do NOT paint per-glyph background; we only want a paragraph-wide background.
             tag = gtk_text_buffer_create_tag(buffer, "codeblock",
@@ -419,7 +419,7 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              "wrap-mode", GTK_WRAP_NONE, // Code blocks typically don't wrap
                                              "indent", 2,             // Minimal indent for fenced blocks
                                              NULL);
-        } else if (strcmp(tag_name, "codeblock_indented") == 0) {
+        } else if (g_strcmp0(tag_name, "codeblock_indented") == 0) {
             // Indented code blocks should visually represent the 4+ space indentation
             // Make them feel properly indented according to CommonMark spec
             tag = gtk_text_buffer_create_tag(buffer, "codeblock_indented",
@@ -432,7 +432,7 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              "wrap-mode", GTK_WRAP_NONE, // Code blocks typically don't wrap
                                              "indent", 8,             // More prominent indent for indented blocks
                                              NULL);
-        } else if (strcmp(tag_name, "hr") == 0) {
+        } else if (g_strcmp0(tag_name, "hr") == 0) {
             // Horizontal rule: create a full-width line effect
             // We insert line characters for visual effect but export as "---"
             tag = gtk_text_buffer_create_tag(buffer, "hr",
@@ -446,7 +446,7 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
             // "blockquote1", "blockquote2", ...
             // Style with left margin only; no background colors
             int depth = 1;
-            const char *p = tag_name + strlen("blockquote");
+            const char *p = tag_name + 10; // strlen("blockquote")
             if (p && *p >= '0' && *p <= '9') depth = MAX(1, atoi(p));
             int margin = 16 * depth; // 16px per nesting level
             tag = gtk_text_buffer_create_tag(buffer, tag_name,
@@ -457,12 +457,12 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              "paragraph-background", NULL,  // Explicitly remove paragraph background
                                              "background", NULL,            // Explicitly remove text background
                                              NULL);
-        } else if (strcmp(tag_name, "link") == 0) {
+        } else if (g_strcmp0(tag_name, "link") == 0) {
             tag = gtk_text_buffer_create_tag(buffer, "link",
                                              "foreground", "blue",
                                              "underline", PANGO_UNDERLINE_SINGLE,
                                              NULL);
-        } else if (strcmp(tag_name, "image") == 0) {
+        } else if (g_strcmp0(tag_name, "image") == 0) {
             // This tag is for the alt text or placeholder for an image.
             // Actual image display using GtkTextChildAnchor is more complex and
             // typically requires a GtkTextView instance.
@@ -492,7 +492,7 @@ static void update_blockquote_tag(GtkTextTag *tag, gpointer user_data) {
     const char *name = g_object_get_data(G_OBJECT(tag), "tag-name");
     if (!name || !g_str_has_prefix(name, "blockquote")) return;
     // Ensure left margin is set consistently and no backgrounds
-    int depth = 1; const char *p = name + strlen("blockquote");
+    int depth = 1; const char *p = name + 10; // strlen("blockquote")
     if (p && *p >= '0' && *p <= '9') depth = MAX(1, atoi(p));
     int margin = 16 * depth;
     g_object_set(tag, 
@@ -686,7 +686,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
 }
 
 static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter *iter, const char *text, GSList *active_tags) {
-    if (!text || strlen(text) == 0) return;
+    if (!text || g_utf8_strlen(text, -1) == 0) return;
 
     GtkTextMark *start_mark = gtk_text_buffer_create_mark(buffer, NULL, iter, TRUE); // Left gravity
     // Ensure iter does not go past end of buffer if text is very long or buffer is small
@@ -924,7 +924,7 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
                 // Check if we have fence_info (language) or if the content suggests it's fenced
                 gboolean is_fenced = FALSE;
                 
-                if (info_str && strlen(info_str) > 0) {
+                if (info_str && g_utf8_strlen(info_str, -1) > 0) {
                     // Has language info, definitely fenced
                     is_fenced = TRUE;
                 } else if (code_content) {
@@ -1314,10 +1314,11 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
 // }
 
 
-gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdown_text, 
+gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdown_text,
                                       GtkTextView *text_view, SoupSession *soup_session) {
     g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
     g_return_val_if_fail(markdown_text != NULL, FALSE);
+    g_return_val_if_fail(text_view == NULL || GTK_IS_TEXT_VIEW(text_view), FALSE);
     
     // Store image fetch context for recursive access
     ImageFetchContext *context = g_new(ImageFetchContext, 1);
@@ -1444,7 +1445,7 @@ G_GNUC_UNUSED static void close_inline_tags_from_stack(GString *md_output, GSLis
         if (!force_close_all) {
             for (GSList *gtk_tag_iter = current_gtk_tags; gtk_tag_iter != NULL; gtk_tag_iter = gtk_tag_iter->next) {
                 const char *gtk_tag_name = get_tag_name_safe((GtkTextTag*)gtk_tag_iter->data); // Use helper
-                if (gtk_tag_name && strcmp(active_tag->tag_name, gtk_tag_name) == 0) {
+                if (gtk_tag_name && g_strcmp0(active_tag->tag_name, gtk_tag_name) == 0) {
                     still_active = TRUE;
                     break;
                 }
@@ -1453,10 +1454,10 @@ G_GNUC_UNUSED static void close_inline_tags_from_stack(GString *md_output, GSLis
 
         if (!still_active) { // Tag needs to be closed
             // Append closing Markdown delimiter
-            if (strcmp(active_tag->tag_name, "bold") == 0) g_string_append(md_output, "**");
-            else if (strcmp(active_tag->tag_name, "italic") == 0) g_string_append(md_output, "*");
-            else if (strcmp(active_tag->tag_name, "code") == 0) g_string_append(md_output, "`");
-            else if (strcmp(active_tag->tag_name, "link") == 0) {
+            if (g_strcmp0(active_tag->tag_name, "bold") == 0) g_string_append(md_output, "**");
+            else if (g_strcmp0(active_tag->tag_name, "italic") == 0) g_string_append(md_output, "*");
+            else if (g_strcmp0(active_tag->tag_name, "code") == 0) g_string_append(md_output, "`");
+            else if (g_strcmp0(active_tag->tag_name, "link") == 0) {
                 g_string_append_printf(md_output, "](%s%s%s)",
                                        active_tag->url ? active_tag->url : "",
                                        (active_tag->url && active_tag->title) ? " \"" : "",
@@ -1506,7 +1507,7 @@ G_GNUC_UNUSED static void open_inline_tags_for_segment(GString *md_output, GSLis
         gboolean already_active = FALSE;
         for (GSList *active_iter = *active_inline_stack_ptr; active_iter != NULL; active_iter = active_iter->next) {
             ActiveMarkdownInlineTag *active_md_tag = (ActiveMarkdownInlineTag *)active_iter->data;
-            if (strcmp(active_md_tag->tag_name, current_tag_name) == 0) {
+            if (g_strcmp0(active_md_tag->tag_name, current_tag_name) == 0) {
                 already_active = TRUE;
                 break;
             }
@@ -1517,10 +1518,10 @@ G_GNUC_UNUSED static void open_inline_tags_for_segment(GString *md_output, GSLis
             ActiveMarkdownInlineTag *new_active_tag = g_new0(ActiveMarkdownInlineTag, 1);
             new_active_tag->tag_name = current_tag_name; // Points to the GtkTextTag's name (or our g_object_set_data copy)
 
-            if (strcmp(current_tag_name, "bold") == 0) g_string_append(md_output, "**");
-            else if (strcmp(current_tag_name, "italic") == 0) g_string_append(md_output, "*");
-            else if (strcmp(current_tag_name, "code") == 0) g_string_append(md_output, "`");
-            else if (strcmp(current_tag_name, "link") == 0) {
+            if (g_strcmp0(current_tag_name, "bold") == 0) g_string_append(md_output, "**");
+            else if (g_strcmp0(current_tag_name, "italic") == 0) g_string_append(md_output, "*");
+            else if (g_strcmp0(current_tag_name, "code") == 0) g_string_append(md_output, "`");
+            else if (g_strcmp0(current_tag_name, "link") == 0) {
                 g_string_append(md_output, "["); // Link text will follow
                 // Fetch URL and title if stored on the GtkTextTag
                 // This assumes URL and title are stored as GObject data on the tag

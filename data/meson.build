@@ -18,3 +18,8 @@ install_data('gtktext.desktop',
 install_subdir('icons',
   install_dir: get_option('datadir') / 'gtktext'
 )
+
+# Application icon
+install_data('icons/hicolor/scalable/apps/gtktext.svg',
+  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps'
+)

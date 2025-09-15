@@ -5,7 +5,8 @@ sources = [
   'main.c',
   'cmrender.c',
   'toolbar.c',
-  'settings.c'
+  'settings.c',
+  'util.c'
 ]
 
 # Build dependencies list

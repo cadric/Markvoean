@@ -5,7 +5,7 @@
 /* [0.2.0] - 2025-09-15 - src/settings.c
  * Changed: Added proper input validation with g_return_if_fail().
  */
-#include "settings.h"
+#include <gtktext/settings.h>
 
 // Simpelt settings-vindue med en lukke-knap
 AdwDialog* create_settings_window(GtkWindow *parent) {

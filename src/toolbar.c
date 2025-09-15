@@ -3,9 +3,9 @@
 /* [0.2.0] - 2025-09-15 - src/toolbar.c
  * Changed: Added proper input validation with g_return_if_fail().
  */
-#include "toolbar.h"
-#include "cmrender.h"  // Updated to use the new renderer
-#include "tag_util.h"  // For ensure_tag_name_stored
+#include <gtktext/toolbar.h>
+#include <gtktext/cmrender.h>  // Updated to use the new renderer
+#include <gtktext/tag_util.h>  // For ensure_tag_name_stored
 
 /* Knap callbacks */
 static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {

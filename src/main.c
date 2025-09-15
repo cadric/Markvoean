@@ -16,10 +16,10 @@
 #include <cmark.h>
 #include <locale.h>
 
-#include "toolbar.h"
+#include <gtktext/toolbar.h>
 // #include "gtktext_cmark.h" // Switched to gtktext_cmark
-#include "cmrender.h"      // Use the new renderer
-#include "settings.h"
+#include <gtktext/cmrender.h>      // Use the new renderer
+#include <gtktext/settings.h>
 
 static guint buffer_changed_signal_id = 0; // Store the signal handler ID
 static guint save_timeout_id = 0;         // Debounced autosave timeout ID
@@ -851,6 +851,7 @@ static void on_setting_changed(GSettings *settings, gchar *key, G_GNUC_UNUSED gp
 // Schedules a short idle/timeout to re-parse the entire buffer as CommonMark
 void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const GtkTextIter *at_iter) {
     g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
+    g_return_if_fail(at_iter != NULL);
     
     // Avoid scheduling if a reparse is already queued
     guint existing = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID));

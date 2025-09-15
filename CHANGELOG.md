@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance optimizations in cmrender.c with GQuark caching
 - Tag lookup caching system for improved rendering performance
 - Pre-sized dynamic arrays to reduce memory allocations
+- CLAUDE.md Ultra-Min C Module Template implementation (src/util.c)
+- Proper include/ directory structure for public APIs (include/gtktext/)
+- Application icon integration using favicon.svg
+- Comprehensive Wayland-only policy enforcement
 
 ### Changed
 - Migrated from Make to Meson 1.7.2 build system
@@ -27,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimized build configuration to use Meson's warning_level instead of manual flags
 - File dialog implementation with better error handling
 - Memory management patterns with more consistent GLib usage
+- Reorganized header files to follow GNOME standards (include/gtktext/ structure)
+- Updated all source files to use standardized include paths
+- Enhanced input validation across all public API functions
 
 ### Removed
 - Makefile and Make build system (fully replaced by Meson)
