@@ -1,5 +1,5 @@
 # [0.2.0] - 2025-09-15 - src/meson.build
-# Added: Source files configuration for Meson build system.
+# Changed: Added version header tracking.
 
 sources = [
   'main.c',

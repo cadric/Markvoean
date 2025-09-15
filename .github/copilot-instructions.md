@@ -1,10 +1,21 @@
-# agents.md — Development & Contribution Guidelines (C + GTK4/libadwaita)
+## 📋 PRE-EDIT CHECKLIST
 
-**Audience:** AI coding assistants (Copilot, Claude Code, Code LLMs). Read before any change.
+**Adherence to these rules is mandatory, ALWAYS check this file and follow these rules.**
 
 ---
 
-## 0) Versioning & File Annotations
+## 0) Guiding Principles
+
+1. **GNOME‑first:** follow HIG; use Adwaita patterns (AdwApplication, AdwApplicationWindow, AdwToolbarView, AdwHeaderBar)
+2. **Simplicity:** short, focused functions; minimal state
+3. **Safe C:** clear ownership; `g_autoptr`/`g_autofree`
+4. **Responsive UI:** no blocking I/O; use GIO async or workers
+5. **A11y & i18n:** accessible and translatable by default
+6. **Reproducible:** deterministic flags; same in CI and local
+
+---
+
+## 1) Versioning & File Annotations
 
 **Policy:** Semantic Versioning `MAJOR.MINOR.PATCH`. Update `project()` version in `meson.build` and `CHANGELOG.md`.
 
@@ -38,11 +49,11 @@
 
 ---
 
-## 1) Purpose & Scope
+## 2) Purpose & Scope
 
 Modern GNOME app in **C + GTK 4 + libadwaita** with safe GLib/GObject patterns. Priorities: HIG, Wayland, accessibility, security, performance, reproducibility.
 
-## 2) Platform & Runtime
+## 3) Platform & Runtime
 
 * **Toolkit:** GTK 4
 * **Design:** libadwaita widgets and patterns
@@ -51,7 +62,7 @@ Modern GNOME app in **C + GTK 4 + libadwaita** with safe GLib/GObject patterns. 
 * **Packaging:** Flatpak‑friendly
 * **Settings:** `org.gtk.gtktext` at `/org/gtk/gtktext/`
 
-## 3) Repository Layout
+## 4) Repository Layout
 
 ```
 .
@@ -65,7 +76,7 @@ Modern GNOME app in **C + GTK 4 + libadwaita** with safe GLib/GObject patterns. 
 └── docs/                    # specs (e.g., commonmark_rules.md)
 ```
 
-## 4) Quickstart (Build/Run/Test)
+## 5) Quickstart (Build/Run/Test)
 
 ```sh
 meson setup build
@@ -80,21 +91,13 @@ GSETTINGS_SCHEMA_DIR=./data ./build/gtktext
 meson test -C build --print-errorlogs
 ```
 
-## 5) Tooling & Flags
+## 6) Tooling & Flags
 
 * **pkg-config:** gtk4, libadwaita-1, libcmark
 * **Warnings:** `-Wall -Wextra`; CI treats new warnings as errors
 * **Hardening:** `-O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fPIE` and linker `-Wl,-z,relro -Wl,-z,now -pie`
 * **Format:** `clang-format`; **Static analysis:** `clang-tidy`
 
-## 6) Guiding Principles
-
-1. **GNOME‑first:** follow HIG; use Adwaita patterns (AdwApplication, AdwApplicationWindow, AdwToolbarView, AdwHeaderBar)
-2. **Simplicity:** short, focused functions; minimal state
-3. **Safe C:** clear ownership; `g_autoptr`/`g_autofree`
-4. **Responsive UI:** no blocking I/O; use GIO async or workers
-5. **A11y & i18n:** accessible and translatable by default
-6. **Reproducible:** deterministic flags; same in CI and local
 
 ## 7) Coding Standards (C/GLib/GObject)
 

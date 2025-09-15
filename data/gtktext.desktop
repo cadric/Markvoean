@@ -1,3 +1,5 @@
+# [0.2.0] - 2025-09-15 - data/gtktext.desktop
+# Changed: Added version header tracking.
 [Desktop Entry]
 Type=Application
 Name=GTKText

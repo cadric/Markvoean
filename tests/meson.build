@@ -1,5 +1,5 @@
 # [0.2.0] - 2025-09-15 - tests/meson.build
-# Added: Test configuration for Meson build system.
+# Changed: Added version header tracking.
 
 # Build dependencies for tests (same as main app except main.o)
 test_deps = [gtk4_dep, adwaita_dep, cmark_dep]

@@ -1,5 +1,5 @@
 # [0.2.0] - 2025-09-15 - ui/meson.build
-# Added: UI files configuration for Meson build system.
+# Changed: Added version header tracking.
 
 # Install UI files
 install_data('main_window.ui',

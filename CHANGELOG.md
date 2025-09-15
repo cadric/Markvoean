@@ -6,17 +6,21 @@
 - Test environment configuration for GSettings schema
 - Config.h generation via Meson
 - Build system dependency validation and summary
+- Version headers to all source files for tracking changes
+- Proper input validation with g_return_if_fail() to all public APIs
 
 ### Changed
 - Migrated from Make to Meson 1.7.2 build system
 - Updated build configuration to use Meson's native dependency management
 - Enhanced hardening flags integration through Meson options
 - Improved test execution with proper environment setup
+- Optimized build configuration to use Meson's warning_level instead of manual flags
 
 ### Removed
 - Makefile and Make build system (fully replaced by Meson)
 - Make-generated obj/ and bin/ directories
 - Legacy build artifacts and temporary files
+- Duplicate warning flags in favor of Meson's warning_level
 
 ### Technical Details
 - Requires Meson >= 1.7.2 and Ninja >= 1.12.1

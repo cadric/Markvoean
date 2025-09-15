@@ -1,3 +1,6 @@
+<!-- [0.2.0] - 2025-09-15 - ui/main_window.ui
+     Changed: Added version header tracking.
+-->
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
   <requires lib="gtk" version="4.0"/>

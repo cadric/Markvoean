@@ -1,3 +1,6 @@
+/* [0.2.0] - 2025-09-15 - include/settings.h
+ * Changed: Added version header tracking.
+ */
 #ifndef SETTINGS_H
 #define SETTINGS_H
 

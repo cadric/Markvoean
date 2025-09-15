@@ -1,3 +1,6 @@
+/* [0.2.0] - 2025-09-15 - tests/test_lists.c
+ * Changed: Added version header tracking.
+ */
 #include <glib.h>
 #include <gtk/gtk.h>
 #include "cmrender.h"

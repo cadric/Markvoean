@@ -1,5 +1,8 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
+/* [0.2.0] - 2025-09-15 - src/toolbar.c
+ * Changed: Added proper input validation with g_return_if_fail().
+ */
 #include "toolbar.h"
 #include "cmrender.h"  // Updated to use the new renderer
 #include "tag_util.h"  // For ensure_tag_name_stored
@@ -317,6 +320,8 @@ static void setup_heading_menu(GtkWidget *heading_button, GtkWidget *text_view) 
  * @return The toolbar container widget
  */
 GtkWidget* create_toolbar(GtkWidget *text_view) {
+    g_return_val_if_fail(GTK_IS_TEXT_VIEW(text_view), NULL);
+    
     GtkWidget *parent_window = gtk_widget_get_ancestor(text_view, GTK_TYPE_WINDOW);
     GtkWidget *toolbar_container = NULL;
     

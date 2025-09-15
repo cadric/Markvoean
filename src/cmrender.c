@@ -1,3 +1,6 @@
+/* [0.2.0] - 2025-09-15 - src/cmrender.c
+ * Changed: Added proper input validation with g_return_if_fail().
+ */
 #include "cmrender.h"
 // #include "gtktext_cmark.h" // Removed as per plan
 #include <adwaita.h> // For AdwStyleManager
@@ -500,7 +503,7 @@ static void update_blockquote_tag(GtkTextTag *tag, gpointer user_data) {
 }
 
 void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
-    if (!buffer) return;
+    g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
 
     AdwStyleManager *style_manager = adw_style_manager_get_default();
     AdwColorScheme color_scheme = adw_style_manager_get_color_scheme(style_manager);
@@ -1313,11 +1316,9 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
 
 gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdown_text, 
                                       GtkTextView *text_view, SoupSession *soup_session) {
-    if (!buffer || !markdown_text) {
-        g_warning("cm_render_markdown_to_buffer: Invalid arguments (buffer or markdown_text is NULL).");
-        return FALSE;
-    }
-
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
+    g_return_val_if_fail(markdown_text != NULL, FALSE);
+    
     // Store image fetch context for recursive access
     ImageFetchContext *context = g_new(ImageFetchContext, 1);
     context->soup_session = soup_session;
@@ -1538,9 +1539,7 @@ G_GNUC_UNUSED static void open_inline_tags_for_segment(GString *md_output, GSLis
 
 
 char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
-    if (!buffer) {
-        return g_strdup("");
-    }
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), g_strdup(""));
 
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(buffer, &start, &end);

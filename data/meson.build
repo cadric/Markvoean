@@ -1,5 +1,5 @@
 # [0.2.0] - 2025-09-15 - data/meson.build
-# Added: Data files configuration for Meson build system.
+# Changed: Added version header tracking.
 
 # GSettings schema
 install_data('org.gtk.gtktext.gschema.xml',

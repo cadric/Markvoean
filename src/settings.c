@@ -2,10 +2,15 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 
+/* [0.2.0] - 2025-09-15 - src/settings.c
+ * Changed: Added proper input validation with g_return_if_fail().
+ */
 #include "settings.h"
 
 // Simpelt settings-vindue med en lukke-knap
 AdwDialog* create_settings_window(GtkWindow *parent) {
+    g_return_val_if_fail(parent == NULL || GTK_IS_WINDOW(parent), NULL);
+    
     // Brug AdwPreferencesDialog for en mere standard GNOME-stil (nyere API)
     AdwDialog *dialog = adw_preferences_dialog_new();
     

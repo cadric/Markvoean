@@ -1,3 +1,6 @@
+<!-- [0.2.0] - 2025-09-15 - data/org.gtk.gtktext.gschema.xml
+     Changed: Added version header tracking.
+-->
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gtk.gtktext" path="/org/gtk/gtktext/">

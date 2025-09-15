@@ -1,3 +1,6 @@
+/* [0.2.0] - 2025-09-15 - src/main.c
+ * Changed: Added proper input validation with g_return_if_fail().
+ */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -847,7 +850,8 @@ static void on_setting_changed(GSettings *settings, gchar *key, G_GNUC_UNUSED gp
 
 // Schedules a short idle/timeout to re-parse the entire buffer as CommonMark
 void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const GtkTextIter *at_iter) {
-    if (!buffer) return;
+    g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
+    
     // Avoid scheduling if a reparse is already queued
     guint existing = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID));
     if (existing != 0) {

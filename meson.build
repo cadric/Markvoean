@@ -1,5 +1,5 @@
 # [0.2.0] - 2025-09-15 - meson.build
-# Added: Meson build system migration from Make.
+# Changed: Removed manual warning flags to use Meson's warning_level instead.
 
 project('gtktext', 'c',
   version: '0.2.0',
@@ -19,9 +19,7 @@ project('gtktext', 'c',
 add_project_arguments([
   '-DHAVE_CONFIG_H',
   '-D_FORTIFY_SOURCE=2',
-  '-fstack-protector-strong',
-  '-Wall',
-  '-Wextra'
+  '-fstack-protector-strong'
 ], language: 'c')
 
 # Add project-wide linker arguments for hardening

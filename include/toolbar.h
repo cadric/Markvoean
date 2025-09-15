@@ -1,3 +1,6 @@
+/* [0.2.0] - 2025-09-15 - include/toolbar.h
+ * Changed: Added version header tracking.
+ */
 #ifndef TOOLBAR_H
 #define TOOLBAR_H
 

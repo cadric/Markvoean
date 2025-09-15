@@ -1,3 +1,6 @@
+/* [0.2.0] - 2025-09-15 - include/tag_util.h
+ * Changed: Added proper input validation with g_return_if_fail().
+ */
 #ifndef TAG_UTIL_H
 #define TAG_UTIL_H
 
@@ -11,14 +14,15 @@
  * GObject data for later retrieval with get_tag_name_safe.
  * 
  * @param tag The GtkTextTag that was just created.
- * @param tag_name The name of the tag.
+ * @param name The name of the tag.
  */
 static inline void ensure_tag_name_stored(GtkTextTag *tag, const gchar *name) {
-    if (tag && name) {
-        if (g_object_get_data(G_OBJECT(tag), "tag-name") == NULL) {
-            // Use g_object_set_data_full to ensure g_free is called on the duplicated string
-            g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(name), (GDestroyNotify)g_free);
-        }
+    g_return_if_fail(GTK_IS_TEXT_TAG(tag));
+    g_return_if_fail(name != NULL);
+    
+    if (g_object_get_data(G_OBJECT(tag), "tag-name") == NULL) {
+        // Use g_object_set_data_full to ensure g_free is called on the duplicated string
+        g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(name), (GDestroyNotify)g_free);
     }
 }
 
