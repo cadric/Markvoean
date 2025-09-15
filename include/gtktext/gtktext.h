@@ -16,6 +16,8 @@ extern "C" {
 #include <gtktext/toolbar.h>
 #include <gtktext/settings.h>
 #include <gtktext/util.h>
+#include <gtktext/document.h>
+#include <gtktext/image-widget.h>
 
 #ifdef __cplusplus
 }

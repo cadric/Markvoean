@@ -31,24 +31,56 @@
 * ❌ Global mutable state (prefer instances; justify singletons).
 
 ---
+## 🔄 Version Control & Commit Workflow
 
-## 🔄 Version Control & Workflow
+This project uses a manual versioning process. It is your responsibility to keep it accurate.
 
-**SemVer** in `meson.build` → `project(version:)`; mirror in AppStream.
+**Manual Workflow:**
 
-**Bumps**: PATCH = fixes/refactors/docs; MINOR = features/public API/new strings; MAJOR = breaking API/migrations/removed features. Default to PATCH.
+1. **Code**: Make your changes following all guidelines.
+2. **Test**: Build and run the application locally. Test all functionality including keyboard shortcuts, accessibility features, and core operations. Check for warnings or errors.
+3. **Update version in `meson.build`**:
 
-**Artifacts per change**
+   * Increment the version number (`MAJOR.MINOR.PATCH`) following semantic versioning.
+   * Major: breaking changes, Minor: new features, Patch: bug fixes.
 
-1. Update `meson.build` version. 2) Update `CHANGELOG.md` (date + SemVer). 3) Per‑file header note. 4) If schemas: bump, recompile, note migration. 5) If UI changed: short before/after note or screenshot link.
+```meson
+project('gtktext', 'c',
+  version: '1.2.3',
+  default_options: ['warning_level=3']
+)
+```
 
-**Commit style**: Conventional Commits (`feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`). Imperative, ≤72 chars.
+4. **Update `CHANGELOG.md`**:
 
-**Pre‑commit**: builds clean, tests pass, static analysis clean or justified, no UI blocking, no leaks (ASan/Valgrind on touched paths), version + changelog updated.
+   * Add a new entry under the current date.
+   * Use SemVer headings and clear sections `Added`, `Changed`, `Fixed`.
 
-**Release**: CI green → update AppStream notes → tag `vX.Y.Z` (signed) → produce Flatpak bundle or tarball and attach.
+```md
+## [1.2.3] - 2025-09-15
+### Added
+- toolbar.c: new formatting shortcuts for bold/italic
+
+### Changed
+- document.c: improved memory management for large files
+
+### Fixed
+- cmrender.c: markdown parsing edge case with nested lists
+```
+
+5. **Commit**: Write a short, descriptive commit message following conventional commits (e.g., `fix(cmrender): handle nested list parsing correctly`).
+
+**Pre-commit checklist:**
+
+* Built successfully with `meson compile -C builddir`.
+* Application runs without warnings or crashes.
+* All keyboard shortcuts functional.
+* No memory leaks (run with Valgrind if significant changes).
+* Version bumped in `meson.build`.
+* `CHANGELOG.md` updated with clear descriptions.
 
 ---
+
 
 ## 📐 Code Standards (C, GLib, GObject)
 

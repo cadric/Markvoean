@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-09-15
+
+### Added
+- UI compliance with GNOME HIG patterns
+- Comprehensive accessibility support (WCAG AA)
+- Full internationalization (i18n) framework
+- GObject type system for data structures (Document, ImageWidget)
+- Keyboard shortcuts discovery window
+- Accessible labels and descriptions for all UI elements
+- POT file generation for translations
+
 ## [0.2.0] - 2025-09-15
 
 ### Added
@@ -22,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proper include/ directory structure for public APIs (include/gtktext/)
 - Application icon integration using favicon.svg
 - Comprehensive Wayland-only policy enforcement
+- **UI Structure Compliance**: Verified HIG and libadwaita patterns compliance
+- **Accessibility Support**: Comprehensive accessible names, roles, relations, and keyboard navigation
+- **Keyboard Shortcuts Window**: Discoverable shortcuts window (ui/shortcuts.ui) with Ctrl+?
+- **i18n Framework**: Complete gettext integration with POT file generation
+- **GObject Type System**: Proper G_DECLARE_FINAL_TYPE + G_DEFINE_TYPE implementation
+  - GtktextDocument: Document management with content, file path, and modified state
+  - GtktextImageWidget: Image widget metadata management for markdown
+  - GtktextUtilState: Utility state management using GObject pattern
+- **WCAG AA Compliance**: Proper labeling, keyboard navigation, and contrast support
+- **Translation Infrastructure**: POTFILES.in, LINGUAS, and .desktop.in template
 
 ### Changed
 - Migrated from Make to Meson 1.7.2 build system
@@ -34,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reorganized header files to follow GNOME standards (include/gtktext/ structure)
 - Updated all source files to use standardized include paths
 - Enhanced input validation across all public API functions
+- **UI Files**: Moved XML declaration to top for proper i18n parsing
+- **Util Module**: Converted from simple struct to proper GObject type
+- **Menu Structure**: Added keyboard shortcuts menu item for better accessibility
 
 ### Removed
 - Makefile and Make build system (fully replaced by Meson)

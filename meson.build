@@ -1,8 +1,8 @@
-# [0.2.0] - 2025-09-15 - meson.build
-# Changed: Removed manual warning flags to use Meson's warning_level instead.
+# [0.3.0] - 2025-09-15 - meson.build
+# Added: UI compliance, accessibility, i18n, and GObject types
 
 project('gtktext', 'c',
-  version: '0.2.0',
+  version: '0.3.0',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',
@@ -28,6 +28,9 @@ add_project_link_arguments([
   '-Wl,-z,now',
   '-pie'
 ], language: 'c')
+
+# i18n module for internationalization
+i18n = import('i18n')
 
 # Dependencies
 gtk4_dep = dependency('gtk4')
@@ -64,6 +67,7 @@ project_inc = include_directories('include')
 subdir('src')
 subdir('data')
 subdir('ui')
+subdir('po')
 subdir('tests')
 
 # Summary

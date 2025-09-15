@@ -1,5 +1,5 @@
 # [0.2.0] - 2025-09-15 - data/meson.build
-# Changed: Added version header tracking.
+# Changed: Added version header tracking and i18n desktop file support.
 
 # GSettings schema
 install_data('org.gtk.gtktext.gschema.xml',
@@ -9,8 +9,13 @@ install_data('org.gtk.gtktext.gschema.xml',
 # Note: Schema compilation should be done by the package manager or during system install
 # For development, manually run: glib-compile-schemas ./data
 
-# Desktop file
-install_data('gtktext.desktop',
+# Desktop file with i18n support
+desktop_file = i18n.merge_file(
+  input: 'gtktext.desktop.in',
+  output: 'gtktext.desktop',
+  type: 'desktop',
+  po_dir: '../po',
+  install: true,
   install_dir: get_option('datadir') / 'applications'
 )
 

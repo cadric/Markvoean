@@ -9,6 +9,8 @@
 
 /* Knap callbacks */
 static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+    g_return_if_fail(GTK_IS_TEXT_VIEW(user_data));
+
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
     GtkTextIter start, end;
@@ -49,6 +51,8 @@ static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer u
 }
 
 static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+    g_return_if_fail(GTK_IS_TEXT_VIEW(user_data));
+
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
     GtkTextIter start, end;
@@ -89,6 +93,8 @@ static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
 }
 
 static void on_code_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+    g_return_if_fail(GTK_IS_TEXT_VIEW(user_data));
+
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
     GtkTextIter start, end;

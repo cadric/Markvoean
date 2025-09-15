@@ -1,0 +1,10 @@
+# [0.2.0] - 2025-09-15 - po/LINGUAS
+# Added: Language configuration file for i18n support.
+# Languages available for translation
+# Add language codes here, one per line
+# Examples:
+# en
+# da
+# es
+# fr
+# de

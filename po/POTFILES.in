@@ -1,0 +1,11 @@
+# [0.2.0] - 2025-09-15 - po/POTFILES.in
+# Changed: Added new source files and UI files for translation support.
+# List of source files which contain translatable strings.
+src/main.c
+src/toolbar.c
+src/settings.c
+src/document.c
+src/image-widget.c
+ui/main_window.ui
+ui/shortcuts.ui
+data/gtktext.desktop.in

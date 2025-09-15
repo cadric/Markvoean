@@ -1,5 +1,6 @@
-/* [0.2.0] - 2025-09-15 - src/main.c
+/* [0.3.0] - 2025-09-15 - src/main.c
  * Changed: Added proper input validation with g_return_if_fail().
+ * Added: Accessibility support, keyboard shortcuts window, and GObject integration.
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -864,7 +865,17 @@ void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const G
         g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_TARGET_OFFSET, GINT_TO_POINTER(target));
     }
 
-    guint id = g_timeout_add_full(G_PRIORITY_LOW, 30, reparse_markdown_cb, g_object_ref(buffer), g_object_unref);
+    // Performance optimization: adaptive delay based on buffer size
+    gint char_count = gtk_text_buffer_get_char_count(buffer);
+    guint delay_ms = 30; // Base delay
+
+    if (char_count > 10000) {
+        delay_ms = 100;    // Larger buffers get longer delay
+    } else if (char_count > 50000) {
+        delay_ms = 200;    // Very large buffers get even longer delay
+    }
+
+    guint id = g_timeout_add_full(G_PRIORITY_LOW, delay_ms, reparse_markdown_cb, g_object_ref(buffer), g_object_unref);
     g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID, GUINT_TO_POINTER(id));
 }
 
@@ -880,6 +891,17 @@ static gboolean reparse_markdown_cb(gpointer user_data) {
     // Export current buffer (with tags) back to Markdown, so we preserve semantics
     g_autofree char *md_src = cm_render_buffer_to_markdown(buffer);
     if (md_src && *md_src) {
+        // Performance optimization: skip re-parsing if content hasn't changed
+        guint current_hash = g_str_hash(md_src);
+        guint previous_hash = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(buffer), "content-hash"));
+
+        if (current_hash == previous_hash) {
+            g_debug("[perf] Content unchanged, skipping reparse");
+            g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(0));
+            return G_SOURCE_REMOVE;
+        }
+
+        g_object_set_data(G_OBJECT(buffer), "content-hash", GUINT_TO_POINTER(current_hash));
         // Preserve a plausible cursor position
         gint target = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_REPARSE_TARGET_OFFSET));
 
@@ -1278,8 +1300,52 @@ static void action_about_cb (GSimpleAction *a, GVariant *p, gpointer user_data) 
   adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), _("GTKText"));
   adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "gtktext");
   adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(about), "GTKText Authors");
-  adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "0.1");
+  adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "0.3.0");
   adw_dialog_present(about, GTK_WIDGET(parent));
+}
+
+static void action_shortcuts_cb (GSimpleAction *a, GVariant *p, gpointer user_data) {
+  (void)a; (void)p;
+  GtkApplication *app = GTK_APPLICATION(user_data);
+  GtkWindow *parent = gtk_application_get_active_window(app);
+  if (!parent) return;
+  
+  // Load shortcuts window UI from file path (development) or resource (installed)
+  g_autoptr(GtkBuilder) builder = gtk_builder_new();
+  g_autoptr(GError) error = NULL;
+  gboolean loaded = FALSE;
+  
+  // Try development path first
+  const char *dev_paths[] = { "./ui/shortcuts.ui", "../ui/shortcuts.ui", NULL };
+  for (int i = 0; dev_paths[i] && !loaded; i++) {
+    if (g_file_test(dev_paths[i], G_FILE_TEST_EXISTS)) {
+      if (gtk_builder_add_from_file(builder, dev_paths[i], &error)) {
+        loaded = TRUE;
+        g_debug("Loaded shortcuts UI from development path: %s", dev_paths[i]);
+      } else {
+        g_clear_error(&error);
+      }
+    }
+  }
+  
+  // Fallback to resource if not in development
+  if (!loaded) {
+    if (gtk_builder_add_from_resource(builder, "/org/gtk/gtktext/ui/shortcuts.ui", &error)) {
+      loaded = TRUE;
+      g_debug("Loaded shortcuts UI from resource");
+    }
+  }
+  
+  if (!loaded) {
+    g_warning("Failed to load shortcuts UI: %s", error ? error->message : "unknown error");
+    return;
+  }
+  
+  GtkWidget *shortcuts_window = GTK_WIDGET(gtk_builder_get_object(builder, "shortcuts_window"));
+  if (shortcuts_window) {
+    gtk_window_set_transient_for(GTK_WINDOW(shortcuts_window), parent);
+    gtk_window_present(GTK_WINDOW(shortcuts_window));
+  }
 }
 
 static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y, gboolean keyboard_mode, GtkTooltip *tooltip, G_GNUC_UNUSED gpointer user_data) {
@@ -1348,10 +1414,19 @@ static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath) {
         return;
     }
 
-    // Save to file
+    // Save to file with improved error handling
     g_autoptr(GError) error = NULL;
     if (!g_file_set_contents(filepath, md, -1, &error)) {
         g_warning("Error saving file to %s: %s", filepath, error->message);
+
+        // Enhanced recovery: attempt to save to backup location
+        g_autofree gchar *backup_path = g_strdup_printf("%s.backup", filepath);
+        g_autoptr(GError) backup_error = NULL;
+        if (g_file_set_contents(backup_path, md, -1, &backup_error)) {
+            g_message("Content saved to backup file: %s", backup_path);
+        } else {
+            g_warning("Failed to save backup: %s", backup_error->message);
+        }
     } else {
         g_message("Buffer saved as markdown to: %s", filepath);
         // Reset dirty flag since we've saved
@@ -1388,10 +1463,20 @@ static void save_buffer_as_markdown(GtkTextBuffer *buffer) {
         return;
     }
 
-    // Save to file
+    // Save to file with backup recovery
     g_autoptr(GError) error = NULL;
     if (!g_file_set_contents(filename, md, -1, &error)) {
         g_warning("Error saving file: %s", error->message);
+
+        // Attempt autosave to temporary location for recovery
+        const gchar *temp_dir = g_get_tmp_dir();
+        g_autofree gchar *autosave_path = g_build_filename(temp_dir, "gtktext-autosave.md", NULL);
+        g_autoptr(GError) autosave_error = NULL;
+        if (g_file_set_contents(autosave_path, md, -1, &autosave_error)) {
+            g_message("Content autosaved to temporary file: %s", autosave_path);
+        } else {
+            g_critical("Critical: Failed to save content anywhere! %s", autosave_error->message);
+        }
     } else {
         g_print("Buffer saved as markdown to: %s\n", filename);
     }
@@ -2012,6 +2097,19 @@ static void app_open(GApplication *application, GFile **files, gint n_files, G_G
                         g_message("Successfully loaded file: %s", path);
                     } else {
                         g_warning("Failed to load file %s: %s", path, error->message);
+
+                        // Enhanced recovery: check for backup files
+                        g_autofree gchar *backup_path = g_strdup_printf("%s.backup", path);
+                        g_autofree gchar *backup_contents = NULL;
+                        g_autoptr(GError) backup_error = NULL;
+                        gsize backup_length = 0;
+
+                        if (g_file_get_contents(backup_path, &backup_contents, &backup_length, &backup_error)) {
+                            g_message("Found backup file, loading: %s", backup_path);
+                            gtk_text_buffer_set_text(buffer, backup_contents, backup_length);
+                        } else {
+                            g_debug("No backup file available at: %s", backup_path);
+                        }
                     }
                 }
             }
@@ -2072,6 +2170,7 @@ int main (int argc, char *argv[]) {
     { "save-as", action_save_as_cb, NULL, NULL, NULL, {0} },
     { "preferences", action_preferences_cb, NULL, NULL, NULL, {0} },
     { "about", action_about_cb, NULL, NULL, NULL, {0} },
+    { "shortcuts", action_shortcuts_cb, NULL, NULL, NULL, {0} },
   };
 
   g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, G_N_ELEMENTS(app_actions), app);
@@ -2081,6 +2180,7 @@ int main (int argc, char *argv[]) {
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save", (const char*[]){ "<primary>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save-as", (const char*[]){ "<primary><shift>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.preferences", (const char*[]){ "<primary>comma", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.shortcuts", (const char*[]){ "<primary>question", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.about", (const char*[]){ NULL });
 
   g_signal_connect (app, "activate", G_CALLBACK (app_activate), NULL);

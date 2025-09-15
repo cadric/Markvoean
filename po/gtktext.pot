@@ -1,0 +1,236 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the gtktext package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: gtktext\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-09-15 16:46+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/main.c:726
+msgid "Image"
+msgstr ""
+
+#: src/main.c:967 src/main.c:1002
+msgid "Markdown Files"
+msgstr ""
+
+#: src/main.c:979 src/main.c:1011
+msgid "All Files"
+msgstr ""
+
+#. Set title and file filters for markdown files
+#. Set title for markdown files
+#: src/main.c:1122 src/main.c:1193
+msgid "Open Markdown File"
+msgstr ""
+
+#: src/main.c:1259
+msgid "Save Markdown File"
+msgstr ""
+
+#: src/main.c:1300 ui/main_window.ui:9 data/gtktext.desktop.in:5
+msgid "GTKText"
+msgstr ""
+
+#: src/main.c:2026
+msgid "Open"
+msgstr ""
+
+#: src/main.c:2031
+msgid "Save"
+msgstr ""
+
+#: src/main.c:2036
+msgid "Save As"
+msgstr ""
+
+#: src/toolbar.c:49
+msgid "No text selected for italic"
+msgstr ""
+
+#: src/toolbar.c:91
+msgid "No text selected for bold"
+msgstr ""
+
+#: src/toolbar.c:282
+msgid "No text selected for heading"
+msgstr ""
+
+#: src/settings.c:36 ui/shortcuts.ui:37
+msgid "Preferences"
+msgstr ""
+
+#: src/settings.c:40
+msgid "Autosave delay"
+msgstr ""
+
+#: ui/main_window.ui:13
+msgid "GTKText main window"
+msgstr ""
+
+#: ui/main_window.ui:14
+msgid "Main application window for editing markdown documents"
+msgstr ""
+
+#: ui/main_window.ui:24
+msgid "Open a File"
+msgstr ""
+
+#: ui/main_window.ui:26
+msgid "Open file"
+msgstr ""
+
+#: ui/main_window.ui:27
+msgid "Open an existing markdown file"
+msgstr ""
+
+#: ui/main_window.ui:34 ui/shortcuts.ui:25
+msgid "Save Document"
+msgstr ""
+
+#: ui/main_window.ui:36
+msgid "Save document"
+msgstr ""
+
+#: ui/main_window.ui:37
+msgid "Save the current document to file"
+msgstr ""
+
+#: ui/main_window.ui:44
+msgid "Save Document As..."
+msgstr ""
+
+#: ui/main_window.ui:46
+msgid "Save document as"
+msgstr ""
+
+#: ui/main_window.ui:47
+msgid "Save the current document to a new file location"
+msgstr ""
+
+#: ui/main_window.ui:55 ui/main_window.ui:57
+msgid "Application menu"
+msgstr ""
+
+#: ui/main_window.ui:58
+msgid "Access application preferences and information"
+msgstr ""
+
+#: ui/main_window.ui:71
+msgid "Application views"
+msgstr ""
+
+#: ui/main_window.ui:72
+msgid "Switch between welcome screen and editor view"
+msgstr ""
+
+#: ui/main_window.ui:103
+msgid "Open Document"
+msgstr ""
+
+#: ui/main_window.ui:112
+msgid "Select a .md file to open or create a new document"
+msgstr ""
+
+#: ui/main_window.ui:126
+msgid "New File"
+msgstr ""
+
+#: ui/main_window.ui:128
+msgid "Create new file"
+msgstr ""
+
+#: ui/main_window.ui:129
+msgid "Create a new markdown document"
+msgstr ""
+
+#: ui/main_window.ui:138 ui/shortcuts.ui:19
+msgid "Open File"
+msgstr ""
+
+#: ui/main_window.ui:140
+msgid "Open existing file"
+msgstr ""
+
+#: ui/main_window.ui:141
+msgid "Open an existing markdown file from disk"
+msgstr ""
+
+#: ui/main_window.ui:185
+msgid "Markdown editor"
+msgstr ""
+
+#: ui/main_window.ui:186
+msgid "Main text editor for writing and editing markdown content"
+msgstr ""
+
+#: ui/main_window.ui:204
+msgid "_Preferences"
+msgstr ""
+
+#: ui/main_window.ui:208
+msgid "_Keyboard Shortcuts"
+msgstr ""
+
+#: ui/main_window.ui:212
+msgid "_About GTKText"
+msgstr ""
+
+#: ui/shortcuts.ui:13 ui/shortcuts.ui:74
+msgid "General"
+msgstr ""
+
+#: ui/shortcuts.ui:16
+msgid "File Operations"
+msgstr ""
+
+#: ui/shortcuts.ui:31
+msgid "Save Document As"
+msgstr ""
+
+#: ui/shortcuts.ui:45
+msgid "Editing"
+msgstr ""
+
+#: ui/shortcuts.ui:48
+msgid "Copy as Markdown"
+msgstr ""
+
+#: ui/shortcuts.ui:54
+msgid "Zoom In"
+msgstr ""
+
+#: ui/shortcuts.ui:60
+msgid "Zoom Out"
+msgstr ""
+
+#: ui/shortcuts.ui:66
+msgid "Reset Zoom"
+msgstr ""
+
+#: ui/shortcuts.ui:77
+msgid "Show Shortcuts"
+msgstr ""
+
+#: ui/shortcuts.ui:83
+msgid "Quit Application"
+msgstr ""
+
+#: data/gtktext.desktop.in:6
+msgid "A simple text editor with Markdown support"
+msgstr ""
+
+#: data/gtktext.desktop.in:11
+msgid "Markdown;Text;Editor;"
+msgstr ""

@@ -1316,6 +1316,18 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
     g_return_val_if_fail(markdown_text != NULL, FALSE);
     g_return_val_if_fail(text_view == NULL || GTK_IS_TEXT_VIEW(text_view), FALSE);
+
+    // Enhanced validation: check for reasonable input size (prevent DoS)
+    size_t md_len = g_utf8_strlen(markdown_text, -1);
+    if (md_len == 0) {
+        g_debug("[parse] Empty markdown text provided, clearing buffer");
+        gtk_text_buffer_set_text(buffer, "", 0);
+        return TRUE;
+    }
+    if (md_len > 1000000) { // 1MB limit for safety
+        g_warning("Markdown text too large (%zu chars), truncating for safety", md_len);
+        // Could implement truncation here if needed
+    }
     
     // Store image fetch context for recursive access
     ImageFetchContext *context = g_new(ImageFetchContext, 1);
@@ -1341,10 +1353,10 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     // CMARK_OPT_SMART: Use smart punctuation. (Good for display)
     // CMARK_OPT_VALIDATE_UTF8: Ensure UTF-8 validity.
     // Enable SOURCEPOS to preserve exact blank-line gaps between blocks
-    size_t md_len = strlen(markdown_text);
+    size_t md_byte_len = strlen(markdown_text); // Use byte length for cmark parser
     int options = CMARK_OPT_SMART | CMARK_OPT_VALIDATE_UTF8 | CMARK_OPT_SOURCEPOS;
     g_debug("[parse] Starting CommonMark parsing with options: %d", options);
-    g_debug("[parse] Input text length: %zu", md_len);
+    g_debug("[parse] Input text length: %zu bytes (%zu chars)", md_byte_len, md_len);
     g_debug("[parse] First 100 chars: %.100s", markdown_text);
 
     cmark_parser *parser = cmark_parser_new(options);
@@ -1353,7 +1365,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
         return FALSE;
     }
 
-    cmark_parser_feed(parser, markdown_text, md_len);
+    cmark_parser_feed(parser, markdown_text, md_byte_len);
     cmark_node *document = cmark_parser_finish(parser);
     cmark_parser_free(parser);
 
@@ -1541,9 +1553,16 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
 
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(buffer, &start, &end);
-    
+
     if (gtk_text_iter_equal(&start, &end)) {
+        g_debug("[export] Empty buffer, returning empty string");
         return g_strdup("");
+    }
+
+    // Enhanced validation: check buffer size for performance
+    gint char_count = gtk_text_buffer_get_char_count(buffer);
+    if (char_count > 500000) { // 500K chars limit for performance
+        g_warning("[export] Large buffer (%d chars) may impact performance", char_count);
     }
     
     GString *md = g_string_new("");

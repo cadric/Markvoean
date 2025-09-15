@@ -1,12 +1,14 @@
 # [0.2.0] - 2025-09-15 - src/meson.build
-# Changed: Added version header tracking.
+# Changed: Added version header tracking and new GObject source files.
 
 sources = [
   'main.c',
   'cmrender.c',
   'toolbar.c',
   'settings.c',
-  'util.c'
+  'util.c',
+  'document.c',
+  'image-widget.c'
 ]
 
 # Build dependencies list
