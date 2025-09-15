@@ -30,6 +30,8 @@ test_sources = [
 # Set up test environment with GSettings schema directory
 test_env = environment()
 test_env.set('GSETTINGS_SCHEMA_DIR', meson.current_source_dir() + '/../data')
+# Enforce Wayland-only policy as per CLAUDE.md guidelines
+test_env.set('GDK_BACKEND', 'wayland')
 
 # Create test executables
 foreach test_src : test_sources

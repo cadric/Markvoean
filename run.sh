@@ -12,5 +12,6 @@ if [ ! -f "$SCHEMA_DIR/gschemas.compiled" ] || [ "$SCHEMA_DIR/org.gtk.gtktext.gs
     glib-compile-schemas "$SCHEMA_DIR"
 fi
 
-echo "🚀 Launching GTKText..."
-GSETTINGS_SCHEMA_DIR="$SCHEMA_DIR" exec "$EXECUTABLE" "$@"
+echo "🚀 Launching GTKText with Wayland backend (policy compliant)..."
+# Enforce Wayland-only policy as per CLAUDE.md guidelines
+GDK_BACKEND=wayland GSETTINGS_SCHEMA_DIR="$SCHEMA_DIR" exec "$EXECUTABLE" "$@"

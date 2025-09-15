@@ -2040,6 +2040,23 @@ int main (int argc, char *argv[]) {
     }
   }
 
+  // Enforce Wayland-only policy as per CLAUDE.md guidelines
+  const char *current_backend = g_getenv("GDK_BACKEND");
+  if (!current_backend) {
+    g_setenv("GDK_BACKEND", "wayland", TRUE);
+    g_message("Enforcing Wayland-only policy: set GDK_BACKEND=wayland");
+  } else if (g_strcmp0(current_backend, "x11") == 0) {
+    g_warning("X11 backend detected but GTKText follows Wayland-only policy");
+    g_warning("Consider running with: GDK_BACKEND=wayland %s", argv[0]);
+    // Override X11 with Wayland for compliance
+    g_setenv("GDK_BACKEND", "wayland", TRUE);
+    g_message("Overriding X11 backend with Wayland for policy compliance");
+  } else if (g_strcmp0(current_backend, "wayland") == 0) {
+    g_debug("Wayland backend active - policy compliant");
+  } else {
+    g_message("Using backend '%s' - Wayland preferred per policy", current_backend);
+  }
+
   // In dev runs, locate local GSettings schemas automatically
   maybe_setup_gsettings_schemas();
   // Initialize i18n
