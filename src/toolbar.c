@@ -1,296 +1,470 @@
+/* C ULTRA‑MIN TEMPLATE
+   Purpose: Toolbar UI component with formatting actions
+   Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
+*/
+#include "config.h"
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
-/* [0.2.0] - 2025-09-15 - src/toolbar.c
- * Changed: Added proper input validation with g_return_if_fail().
- */
 #include <gtktext/toolbar.h>
-#include <gtktext/cmrender.h>  // Updated to use the new renderer
-#include <gtktext/tag_util.h>  // For ensure_tag_name_stored
+#include <gtktext/cmrender.h>
+#include <gtktext/tag_util.h>
 
-/* Knap callbacks */
+/* ========== META ========== */
+/* [0.3.0] - 2025-09-15 - src/toolbar.c
+ * Changed: Restructured to follow Ultra-Min template pattern.
+ * [0.3.5] - 2025-09-15 - Fixed heading toolbar buttons to trigger re-rendering
+ * [0.3.6] - 2025-09-15 - Fixed "Normal tekst" to remove heading formatting
+ * [0.3.7] - 2025-09-15 - Fixed "Normal tekst" to detect heading tags in rendered text
+ */
+
+/* ========== TYPES ========== */
+typedef enum {
+    VIEW_MODE_WYSIWYG,
+    VIEW_MODE_SOURCE
+} ViewMode;
+
+typedef struct {
+    GtkTextView *text_view;
+    GtkTextBuffer *buffer;
+    GtkHeaderBar *header_bar;
+    GtkButton *bold_button;
+    GtkButton *italic_button;
+    GtkButton *heading_button;
+    GtkButton *code_button;
+    GtkButton *hr_button;
+    GtkButton *source_view_button;
+    ViewMode current_view_mode;
+    GtkTextView *source_text_view;  // Separate text view for source mode
+    GtkTextBuffer *source_buffer;   // Separate buffer for source mode
+    GtkWidget *scrolled_window;     // Store the scrolled window container
+    GtkTextView *original_text_view; // Store original text view reference
+} ToolbarComponent;
+
+/* ========== STATE ========== */
+static ToolbarComponent toolbar_state = { 0 };
+
+/* ========== HELPERS ========== */
+static void toolbar_reset(ToolbarComponent *t) {
+    g_return_if_fail(t != NULL);
+    
+    // Clean up any existing source view resources
+    if (t->source_text_view && GTK_IS_WIDGET(t->source_text_view)) {
+        // Only unparent if it has a parent
+        GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(t->source_text_view));
+        if (parent) {
+            if (GTK_IS_SCROLLED_WINDOW(parent)) {
+                gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(parent), NULL);
+            } else {
+                gtk_widget_unparent(GTK_WIDGET(t->source_text_view));
+            }
+        }
+        // Widget will be automatically destroyed when removed from parent
+    }
+    
+    if (t->source_buffer && G_IS_OBJECT(t->source_buffer)) {
+        g_object_unref(t->source_buffer);
+    }
+    
+    t->text_view = NULL;
+    t->buffer = NULL;
+    t->header_bar = NULL;
+    t->bold_button = NULL;
+    t->italic_button = NULL;
+    t->heading_button = NULL;
+    t->code_button = NULL;
+    t->hr_button = NULL;
+    t->source_view_button = NULL;
+    t->current_view_mode = VIEW_MODE_WYSIWYG;
+    t->source_text_view = NULL;
+    t->source_buffer = NULL;
+    t->scrolled_window = NULL;
+    t->original_text_view = NULL;
+}
+
+static gboolean validate_text_view(GtkTextView *text_view, GError **error) {
+    g_return_val_if_fail(error == NULL || *error == NULL, FALSE);
+    
+    if (!GTK_IS_TEXT_VIEW(text_view)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                   "Invalid text view provided");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static GtkTextTag* ensure_tag_exists(GtkTextBuffer *buffer, const char *tag_name, 
+                                      const char *property, gpointer value) {
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), NULL);
+    g_return_val_if_fail(tag_name != NULL, NULL);
+    
+    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
+    GtkTextTag *tag = gtk_text_tag_table_lookup(tag_table, tag_name);
+    
+    if (!tag) {
+        if (property) {
+            tag = gtk_text_buffer_create_tag(buffer, tag_name, property, value, NULL);
+        } else {
+            tag = gtk_text_buffer_create_tag(buffer, tag_name, NULL);
+        }
+        ensure_tag_name_stored(tag, tag_name);
+    }
+    return tag;
+}
+
+static void toggle_tag_on_selection(GtkTextBuffer *buffer, const char *tag_name,
+                                   const char *property, gpointer value) {
+    g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
+    g_return_if_fail(tag_name != NULL);
+    
+    GtkTextIter start, end;
+    if (!gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
+        g_message("%s", _("No text selected for formatting"));
+        return;
+    }
+    
+    GtkTextTag *tag = ensure_tag_exists(buffer, tag_name, property, value);
+    if (!tag) return;
+    
+    // Check if entire selection has the tag
+    gboolean fully_tagged = TRUE;
+    GtkTextIter iter = start;
+    while (!gtk_text_iter_equal(&iter, &end)) {
+        if (!gtk_text_iter_has_tag(&iter, tag)) {
+            fully_tagged = FALSE;
+            break;
+        }
+        gtk_text_iter_forward_char(&iter);
+    }
+    
+    // Toggle: remove if fully tagged, add otherwise
+    if (fully_tagged) {
+        gtk_text_buffer_remove_tag(buffer, tag, &start, &end);
+    } else {
+        gtk_text_buffer_apply_tag(buffer, tag, &start, &end);
+    }
+}
+
+/* ========== HANDLERS ========== */
 static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
-    g_return_if_fail(GTK_IS_TEXT_VIEW(user_data));
+    g_autoptr(GError) error = NULL;
+    
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for italic action: %s", error->message);
+        return;
+    }
 
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    GtkTextIter start, end;
-    
-    // Få fat i tag-tabellen
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-    GtkTextTag *italic_tag = gtk_text_tag_table_lookup(tag_table, "italic");
-    
-    // Opret tag hvis det ikke findes
-    if (!italic_tag) {
-        italic_tag = gtk_text_buffer_create_tag(buffer, "italic", 
-                                            "style", PANGO_STYLE_ITALIC, 
-                                            NULL);
-        ensure_tag_name_stored(italic_tag, "italic");
-    }
-    
-    if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
-        // Tjek om hele markeringen allerede er i kursiv
-        gboolean fully_italic = TRUE;
-        GtkTextIter iter = start;
-        while (!gtk_text_iter_equal(&iter, &end)) {
-            if (!gtk_text_iter_has_tag(&iter, italic_tag)) {
-                fully_italic = FALSE;
-                break;
-            }
-            gtk_text_iter_forward_char(&iter);
-        }
-        
-        // Toggling: Hvis hele markeringen er kursiv, fjern det. Ellers tilføj det.
-        if (fully_italic) {
-            gtk_text_buffer_remove_tag(buffer, italic_tag, &start, &end);
-        } else {
-            gtk_text_buffer_apply_tag(buffer, italic_tag, &start, &end);
-        }
-    } else {
-        g_message("%s", _("No text selected for italic"));
-    }
+    toggle_tag_on_selection(buffer, "italic", "style", GINT_TO_POINTER(PANGO_STYLE_ITALIC));
 }
 
 static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
-    g_return_if_fail(GTK_IS_TEXT_VIEW(user_data));
+    g_autoptr(GError) error = NULL;
+    
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for bold action: %s", error->message);
+        return;
+    }
 
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    GtkTextIter start, end;
-    
-    // Få fat i tag-tabellen
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-    GtkTextTag *bold_tag = gtk_text_tag_table_lookup(tag_table, "bold");
-    
-    // Opret tag hvis det ikke findes
-    if (!bold_tag) {
-        bold_tag = gtk_text_buffer_create_tag(buffer, "bold", 
-                                          "weight", PANGO_WEIGHT_BOLD, 
-                                          NULL);
-        ensure_tag_name_stored(bold_tag, "bold");
-    }
-    
-    if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
-        // Tjek om hele markeringen allerede er fed
-        gboolean fully_bold = TRUE;
-        GtkTextIter iter = start;
-        while (!gtk_text_iter_equal(&iter, &end)) {
-            if (!gtk_text_iter_has_tag(&iter, bold_tag)) {
-                fully_bold = FALSE;
-                break;
-            }
-            gtk_text_iter_forward_char(&iter);
-        }
-        
-        // Toggling: Hvis hele markeringen er fed, fjern det. Ellers tilføj det.
-        if (fully_bold) {
-            gtk_text_buffer_remove_tag(buffer, bold_tag, &start, &end);
-        } else {
-            gtk_text_buffer_apply_tag(buffer, bold_tag, &start, &end);
-        }
-    } else {
-        g_message("%s", _("No text selected for bold"));
-    }
+    toggle_tag_on_selection(buffer, "bold", "weight", GINT_TO_POINTER(PANGO_WEIGHT_BOLD));
 }
 
 static void on_code_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
-    g_return_if_fail(GTK_IS_TEXT_VIEW(user_data));
+    g_autoptr(GError) error = NULL;
+    
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for code action: %s", error->message);
+        return;
+    }
 
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    GtkTextIter start, end;
-    
-    // Get the tag table
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-    GtkTextTag *code_tag = gtk_text_tag_table_lookup(tag_table, "code");
-    GtkTextTag *codeblock_tag = gtk_text_tag_table_lookup(tag_table, "codeblock");
-    
-    // Create tags if they don't exist (following cmrender.c pattern)
-    if (!code_tag) {
-        code_tag = gtk_text_buffer_create_tag(buffer, "code", 
-                                             "family", "monospace",
-                                             NULL);
-        ensure_tag_name_stored(code_tag, "code");
-    }
-    
-    if (!codeblock_tag) {
-        codeblock_tag = gtk_text_buffer_create_tag(buffer, "codeblock",
-                                                  "family", "monospace",
-                                                  NULL);
-        ensure_tag_name_stored(codeblock_tag, "codeblock");
-    }
-    
-    if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
-        // Check if selection is multiline
-        g_autofree gchar *selected_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-        gboolean is_multiline = (strchr(selected_text, '\n') != NULL);
-        
-        if (is_multiline) {
-            // Handle code block formatting
-            gboolean fully_codeblock = TRUE;
-            GtkTextIter iter = start;
-            while (!gtk_text_iter_equal(&iter, &end)) {
-                if (!gtk_text_iter_has_tag(&iter, codeblock_tag)) {
-                    fully_codeblock = FALSE;
-                    break;
-                }
-                gtk_text_iter_forward_char(&iter);
-            }
-            
-            if (fully_codeblock) {
-                gtk_text_buffer_remove_tag(buffer, codeblock_tag, &start, &end);
-            } else {
-                gtk_text_buffer_apply_tag(buffer, codeblock_tag, &start, &end);
-            }
-        } else {
-            // Handle inline code formatting
-            gboolean fully_code = TRUE;
-            GtkTextIter iter = start;
-            while (!gtk_text_iter_equal(&iter, &end)) {
-                if (!gtk_text_iter_has_tag(&iter, code_tag)) {
-                    fully_code = FALSE;
-                    break;
-                }
-                gtk_text_iter_forward_char(&iter);
-            }
-            
-            if (fully_code) {
-                gtk_text_buffer_remove_tag(buffer, code_tag, &start, &end);
-            } else {
-                gtk_text_buffer_apply_tag(buffer, code_tag, &start, &end);
-            }
-        }
-        
-        // Trigger immediate reparse for visual update
-        schedule_reparse_markdown(buffer, 0, &start);
-    } else {
-        // No selection - insert inline code template and position cursor inside
-        GtkTextMark *cursor_mark = gtk_text_buffer_get_insert(buffer);
-        gtk_text_buffer_get_iter_at_mark(buffer, &start, cursor_mark);
-        
-        // Insert `` with cursor positioned in between
-        gtk_text_buffer_insert(buffer, &start, "``", -1);
-        
-        // Move cursor back one position to be between the backticks
-        gtk_text_buffer_get_iter_at_mark(buffer, &start, cursor_mark);
-        gtk_text_iter_backward_char(&start);
-        gtk_text_buffer_place_cursor(buffer, &start);
-        
-        // Trigger immediate reparse for visual update
-        schedule_reparse_markdown(buffer, 2, &start);
-    }
+    toggle_tag_on_selection(buffer, "code", "family", "monospace");
 }
 
 static void on_hr_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+    g_autoptr(GError) error = NULL;
+    
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for hr action: %s", error->message);
+        return;
+    }
+
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    GtkTextIter insert;
-    GtkTextMark *cursor_mark;
     
-    // Få fat i tag-tabellen
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-    GtkTextTag *hr_tag = gtk_text_tag_table_lookup(tag_table, "hr");
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
     
-    // Opret tag hvis det ikke findes
-    // Ensure hr_tag is created and name stored if it doesn't exist
-    if (!hr_tag) {
-        hr_tag = gtk_text_buffer_create_tag(buffer, "hr",
-                                            "editable", FALSE,
-                                            // "foreground", "gray", // Example: style for HR
-                                            // "paragraph-background", "#f0f0f0",
-                                            NULL);
-        ensure_tag_name_stored(hr_tag, "hr");
-    }
-    
-    // Få current cursor position mark
-    cursor_mark = gtk_text_buffer_get_insert(buffer);
-    gtk_text_buffer_get_iter_at_mark(buffer, &insert, cursor_mark);
-    
-    // Sikre at vi indsætter på en ny linie
-    if (!gtk_text_iter_starts_line(&insert)) {
-        gtk_text_buffer_insert(buffer, &insert, "\n", 1);
-        // Opdater iterator efter indsætning
-        gtk_text_buffer_get_iter_at_mark(buffer, &insert, cursor_mark);
-    }
-    
-    // Tilføj en tekstmark på starten af HR-linjen
-    GtkTextMark *start_mark = gtk_text_buffer_create_mark(buffer, NULL, &insert, TRUE);
-    
-    // Indsæt horizontal rule markør
-    gtk_text_buffer_insert(buffer, &insert, "---", 3);
-    
-    // Få start og slut iteratorer ved hjælp af marks
-    GtkTextIter start, end;
-    gtk_text_buffer_get_iter_at_mark(buffer, &start, start_mark);
-    end = insert;  // Den nuværende position efter indsætning
-    
-    // Anvend tag mellem de opdaterede iteratorer
-    gtk_text_buffer_apply_tag(buffer, hr_tag, &start, &end);
-    
-    // Indsæt en ny linie efter HR
-    gtk_text_buffer_insert(buffer, &insert, "\n", 1);
-    
-    // Fjern det midlertidige mark
-    gtk_text_buffer_delete_mark(buffer, start_mark);
-    
-    // Trigger immediate re-rendering to show the HR formatting
-    schedule_reparse_markdown(buffer, 5, &insert); // 3 for "---" + 2 for newlines
+    // Ensure we're at start of line
+    gtk_text_iter_set_line_offset(&cursor, 0);
+    gtk_text_buffer_insert(buffer, &cursor, "---\n", -1);
 }
 
 static void on_heading_button_clicked(GtkButton *button, gpointer user_data) {
-    // Find heading level fra knappen
-    int level = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "heading-level"));
+    g_autoptr(GError) error = NULL;
     
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for heading action: %s", error->message);
+        return;
+    }
+
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    GtkTextIter start, end;
     
-    if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
-        // Fjern alle eksisterende heading tags først
-        GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-        for (int i = 1; i <= 6; i++) {
-            char tag_name[3];
-            g_snprintf(tag_name, sizeof(tag_name), "h%d", i);
-            
-            GtkTextTag *heading_tag = gtk_text_tag_table_lookup(tag_table, tag_name);
-            if (heading_tag) {
-                gtk_text_buffer_remove_tag(buffer, heading_tag, &start, &end);
-            }
+    // Get heading level from button data
+    const char *level = g_object_get_data(G_OBJECT(button), "heading-level");
+
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
+
+    // Move to start of current line
+    gtk_text_iter_set_line_offset(&cursor, 0);
+
+    // Handle "Normal tekst" case (empty level) - remove existing heading formatting
+    if (!level || !*level) {
+
+        // Check if the current line has any heading tags
+        GtkTextIter line_start = cursor;
+        GtkTextIter line_end = cursor;
+        gtk_text_iter_set_line_offset(&line_start, 0);
+        if (!gtk_text_iter_ends_line(&line_end)) {
+            gtk_text_iter_forward_to_line_end(&line_end);
         }
-        
-        // Anvend nyt tag hvis level > 0
-        if (level > 0) {
-            char tag_name[3];
-            g_snprintf(tag_name, sizeof(tag_name), "h%d", level);
-            
-            GtkTextTag *heading_tag = gtk_text_tag_table_lookup(tag_table, tag_name);
-            if (!heading_tag) {
-                // Calculate size based on heading level (larger for H1, smaller for H6)
-                double size_factor = 2.0 - ((level - 1) * 0.2);
-                
-                heading_tag = gtk_text_buffer_create_tag(buffer, tag_name,
-                                                      "weight", PANGO_WEIGHT_BOLD,
-                                                      "scale", size_factor,
-                                                      NULL);
-                ensure_tag_name_stored(heading_tag, tag_name);
+
+        // Check for heading tags on the current line
+        gboolean has_heading = FALSE;
+
+        GtkTextIter check_iter = line_start;
+        while (gtk_text_iter_compare(&check_iter, &line_end) < 0) {
+            GSList *tags_at_iter = gtk_text_iter_get_tags(&check_iter);
+            for (GSList *l = tags_at_iter; l != NULL; l = l->next) {
+                GtkTextTag *tag = GTK_TEXT_TAG(l->data);
+                gchar *tag_name = NULL;
+                g_object_get(tag, "name", &tag_name, NULL);
+                if (tag_name) {
+                    if (g_strcmp0(tag_name, "h1") == 0 || g_strcmp0(tag_name, "h2") == 0 ||
+                        g_strcmp0(tag_name, "h3") == 0 || g_strcmp0(tag_name, "h4") == 0 ||
+                        g_strcmp0(tag_name, "h5") == 0 || g_strcmp0(tag_name, "h6") == 0) {
+                        has_heading = TRUE;
+                    }
+                    g_free(tag_name);
+                    if (has_heading) break;
+                }
             }
-            
-            // Anvend tag
-            gtk_text_buffer_apply_tag(buffer, heading_tag, &start, &end);
-            g_message("Applied heading H%d", level);
+            g_slist_free(tags_at_iter);
+            if (has_heading) break;
+            gtk_text_iter_forward_char(&check_iter);
+        }
+
+        if (has_heading) {
+            // Get the plain text content and replace the entire line
+            g_autofree char *line_text = gtk_text_buffer_get_text(buffer, &line_start, &line_end, FALSE);
+
+            // Delete the entire line and insert just the text content
+            gtk_text_buffer_delete(buffer, &line_start, &line_end);
+            if (line_text && *line_text) {
+                gtk_text_buffer_insert(buffer, &line_start, line_text, -1);
+            }
         }
     } else {
-        g_message("%s", _("No text selected for heading"));
+        // Insert heading prefix
+        g_autofree char *prefix = g_strdup_printf("%s ", level);
+        gtk_text_buffer_insert(buffer, &cursor, prefix, -1);
     }
-    
-    // Gem popup hvis vi er i et popover menu
+
+    // Trigger re-parsing to apply formatting changes
+    GtkTextIter current_pos;
+    gtk_text_buffer_get_iter_at_mark(buffer, &current_pos, gtk_text_buffer_get_insert(buffer));
+    schedule_reparse_markdown(buffer, 0, &current_pos);
+
+    // Close popover if in one
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER);
     if (popover) {
         gtk_popover_popdown(GTK_POPOVER(popover));
     }
 }
 
+static void on_source_view_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+    g_autoptr(GError) error = NULL;
+    
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for source view toggle: %s", error->message);
+        return;
+    }
+
+    // user_data is the original text view passed to create_toolbar - always valid
+    GtkTextView *original_text_view = GTK_TEXT_VIEW(user_data);
+    
+    if (toolbar_state.current_view_mode == VIEW_MODE_WYSIWYG) {
+        // === SWITCH TO SOURCE VIEW ===
+        
+        // Get current buffer content as markdown
+        GtkTextBuffer *current_buffer = gtk_text_view_get_buffer(original_text_view);
+        g_autofree char *markdown = cm_render_buffer_to_markdown(current_buffer);
+        if (!markdown) {
+            g_warning("Failed to extract markdown from buffer");
+            return;
+        }
+        
+        // Find the scrolled window container (should be consistent)
+        GtkWidget *scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(original_text_view), GTK_TYPE_SCROLLED_WINDOW);
+        if (!scrolled_window || !GTK_IS_SCROLLED_WINDOW(scrolled_window)) {
+            g_warning("Could not find valid scrolled window parent for text view");
+            return;
+        }
+        
+        // Store references for restoration
+        toolbar_state.scrolled_window = scrolled_window;
+        toolbar_state.original_text_view = original_text_view;
+        
+        // Create new source view components (destroy old ones first if they exist)
+        if (toolbar_state.source_text_view) {
+            GtkWidget *old_parent = gtk_widget_get_parent(GTK_WIDGET(toolbar_state.source_text_view));
+            if (old_parent) {
+                gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(old_parent), NULL);
+            }
+        }
+        
+        // Create fresh source buffer and view
+        toolbar_state.source_buffer = gtk_text_buffer_new(NULL);
+        toolbar_state.source_text_view = GTK_TEXT_VIEW(gtk_text_view_new_with_buffer(toolbar_state.source_buffer));
+        
+        // Configure source view
+        gtk_text_view_set_wrap_mode(toolbar_state.source_text_view, GTK_WRAP_WORD);
+        gtk_text_view_set_left_margin(toolbar_state.source_text_view, 12);
+        gtk_text_view_set_right_margin(toolbar_state.source_text_view, 12);
+        gtk_text_view_set_top_margin(toolbar_state.source_text_view, 12);
+        gtk_text_view_set_bottom_margin(toolbar_state.source_text_view, 12);
+        gtk_widget_add_css_class(GTK_WIDGET(toolbar_state.source_text_view), "monospace");
+        
+        // Set markdown content
+        gtk_text_buffer_set_text(toolbar_state.source_buffer, markdown, -1);
+        
+        // Swap views in container
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), NULL);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), 
+                                    GTK_WIDGET(toolbar_state.source_text_view));
+        
+        // Update UI state
+        GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
+        gtk_button_set_child(toolbar_state.source_view_button, wysiwyg_icon);
+        gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), 
+                                   _("Switch to WYSIWYG view"));
+        
+        // Disable formatting buttons
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), FALSE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
+        
+        toolbar_state.current_view_mode = VIEW_MODE_SOURCE;
+        g_debug("Switched to source view");
+        
+    } else {
+        // === SWITCH BACK TO WYSIWYG VIEW ===
+        
+        // Validate we have the necessary components
+        if (!toolbar_state.scrolled_window || !GTK_IS_SCROLLED_WINDOW(toolbar_state.scrolled_window)) {
+            g_warning("Could not restore view - invalid scrolled window");
+            return;
+        }
+        
+        if (!toolbar_state.original_text_view || !GTK_IS_TEXT_VIEW(toolbar_state.original_text_view)) {
+            g_warning("Could not restore view - invalid original text view");
+            return;
+        }
+        
+        if (!toolbar_state.source_buffer || !GTK_IS_TEXT_BUFFER(toolbar_state.source_buffer)) {
+            g_warning("Could not restore view - invalid source buffer");
+            return;
+        }
+        
+        // Get edited markdown content
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(toolbar_state.source_buffer, &start, &end);
+        g_autofree char *source_markdown = gtk_text_buffer_get_text(toolbar_state.source_buffer, &start, &end, FALSE);
+        
+        // Remove source view and restore original
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(toolbar_state.scrolled_window), NULL);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(toolbar_state.scrolled_window), 
+                                    GTK_WIDGET(toolbar_state.original_text_view));
+        
+        // Clean up source view components
+        toolbar_state.source_text_view = NULL; // Widget is automatically destroyed when removed
+        if (toolbar_state.source_buffer) {
+            g_object_unref(toolbar_state.source_buffer);
+            toolbar_state.source_buffer = NULL;
+        }
+        
+        // Update main buffer with edited content
+        if (source_markdown && strlen(source_markdown) > 0) {
+            GtkTextBuffer *main_buffer = gtk_text_view_get_buffer(toolbar_state.original_text_view);
+            
+            // Suppress reparse during manual buffer update
+            g_object_set_data(G_OBJECT(main_buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+            gtk_text_buffer_set_text(main_buffer, "", 0);
+            
+            // Get soup session for image loading
+            SoupSession *soup_session = g_object_get_data(G_OBJECT(toolbar_state.original_text_view), "soup-session");
+            if (!soup_session) {
+                soup_session = soup_session_new();
+                g_object_set_data_full(G_OBJECT(toolbar_state.original_text_view), "soup-session", soup_session, g_object_unref);
+            }
+            
+            cm_render_markdown_to_buffer(main_buffer, source_markdown, toolbar_state.original_text_view, soup_session);
+            
+            // Re-enable parsing
+            g_object_set_data(G_OBJECT(main_buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
+        }
+        
+        // Update UI state
+        GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
+        gtk_button_set_child(toolbar_state.source_view_button, source_icon);
+        gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), 
+                                   _("Switch to source view"));
+        
+        // Re-enable formatting buttons
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), TRUE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
+        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
+        
+        toolbar_state.current_view_mode = VIEW_MODE_WYSIWYG;
+        g_debug("Switched to WYSIWYG view");
+    }
+}
+
+/* ========== WIRING ========== */
+static void toolbar_connect_signals(ToolbarComponent *t, GtkTextView *text_view) {
+    g_return_if_fail(t != NULL);
+    g_return_if_fail(GTK_IS_TEXT_VIEW(text_view));
+    
+    if (t->italic_button) {
+        g_signal_connect(t->italic_button, "clicked", G_CALLBACK(on_italic_button_clicked), text_view);
+    }
+    if (t->bold_button) {
+        g_signal_connect(t->bold_button, "clicked", G_CALLBACK(on_bold_button_clicked), text_view);
+    }
+    if (t->code_button) {
+        g_signal_connect(t->code_button, "clicked", G_CALLBACK(on_code_button_clicked), text_view);
+    }
+    if (t->hr_button) {
+        g_signal_connect(t->hr_button, "clicked", G_CALLBACK(on_hr_button_clicked), text_view);
+    }
+    if (t->source_view_button) {
+        g_signal_connect(t->source_view_button, "clicked", G_CALLBACK(on_source_view_button_clicked), text_view);
+    }
+}
+
 static void setup_heading_menu(GtkWidget *heading_button, GtkWidget *text_view) {
-    // Opret popover menu til heading styles
+    g_return_if_fail(GTK_IS_MENU_BUTTON(heading_button));
+    g_return_if_fail(GTK_IS_TEXT_VIEW(text_view));
+    
     GtkWidget *popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(heading_button), popover);
     
@@ -300,17 +474,14 @@ static void setup_heading_menu(GtkWidget *heading_button, GtkWidget *text_view) 
     gtk_widget_set_margin_top(box, 6);
     gtk_widget_set_margin_bottom(box, 6);
     
-    // Tilføj muligheder for overskrifter og normal tekst
     const char *labels[] = {"Normal tekst", "Overskrift 1", "Overskrift 2", "Overskrift 3", 
                             "Overskrift 4", "Overskrift 5", "Overskrift 6"};
+    const char *heading_levels[] = {"", "#", "##", "###", "####", "#####", "######"};
     
     for (int i = 0; i < 7; i++) {
         GtkWidget *item = gtk_button_new_with_label(labels[i]);
-        gtk_widget_set_size_request(item, 120, -1);  // Fast bredde
-        
-        // Gem heading level som data på knappen (0=Normal, 1=H1, osv.)
-        g_object_set_data(G_OBJECT(item), "heading-level", GINT_TO_POINTER(i));
-        
+        gtk_widget_set_size_request(item, 120, -1);
+        g_object_set_data(G_OBJECT(item), "heading-level", (gpointer)heading_levels[i]);
         g_signal_connect(item, "clicked", G_CALLBACK(on_heading_button_clicked), text_view);
         gtk_box_append(GTK_BOX(box), item);
     }
@@ -318,84 +489,37 @@ static void setup_heading_menu(GtkWidget *heading_button, GtkWidget *text_view) 
     gtk_popover_set_child(GTK_POPOVER(popover), box);
 }
 
-/**
- * Create a toolbar with formatting options for the text editor
- * 
- * @param text_view The GtkTextView that will be affected by toolbar actions
- * @return The toolbar container widget
- */
+/* ========== LIFECYCLE ========== */
 GtkWidget* create_toolbar(GtkWidget *text_view) {
-    g_return_val_if_fail(GTK_IS_TEXT_VIEW(text_view), NULL);
+    g_autoptr(GError) error = NULL;
     
+    if (!validate_text_view(GTK_TEXT_VIEW(text_view), &error)) {
+        g_warning("Invalid text view for toolbar: %s", error->message);
+        return NULL;
+    }
+    
+    toolbar_reset(&toolbar_state);
+    toolbar_state.text_view = GTK_TEXT_VIEW(text_view);
+    toolbar_state.buffer = gtk_text_view_get_buffer(toolbar_state.text_view);
+    
+    // Find or create toolbar container
     GtkWidget *parent_window = gtk_widget_get_ancestor(text_view, GTK_TYPE_WINDOW);
     GtkWidget *toolbar_container = NULL;
     
-    // Find toolbar_container fra UI
     if (parent_window) {
         GtkBuilder *builder = g_object_get_data(G_OBJECT(parent_window), "builder");
-        
         if (builder) {
-            // Forsøg at finde toolbar_container via builder
             toolbar_container = GTK_WIDGET(gtk_builder_get_object(builder, "toolbar_container"));
-            
-            if (toolbar_container) {
-                g_debug("Found toolbar_container from UI");
-            } else {
-                // Hvis vi ikke kan finde containeren, forsøg at finde den på en anden måde
-                toolbar_container = GTK_WIDGET(gtk_widget_get_first_child(
-                    gtk_widget_get_first_child(parent_window)));
-                
-                if (GTK_IS_BOX(toolbar_container) && 
-                    gtk_widget_has_css_class(toolbar_container, "toolbar")) {
-                    g_debug("Found toolbar_container via widget hierarchy");
-                } else {
-                    toolbar_container = NULL;
-                    g_warning("Could not find toolbar_container in UI");
-                }
-            }
-        } else {
-            g_warning("No builder found in parent_window");
         }
-    } else {
-        g_warning("No parent_window found for text_view");
     }
     
-    // Hvis vi stadig ikke har en container, opret et fallback
     if (!toolbar_container) {
         toolbar_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
         gtk_widget_add_css_class(toolbar_container, "toolbar");
-        
-        // Tilføj containeren til vinduet
-        if (parent_window) {
-            // I GTK4, kan vi ikke direkte få content_area fra et window
-            // I stedet kan vi finde den første child og se om det har den struktur vi forventer
-            GtkWidget *first_child = gtk_widget_get_first_child(parent_window);
-            
-            if (GTK_IS_BOX(first_child)) {
-                // Det første barn kan være AdwToolbarView eller en box
-                GtkWidget *box_container = first_child;
-                
-                // Hvis det er AdwToolbarView, bør vi få fat i dens box
-                if (g_type_is_a(G_TYPE_FROM_INSTANCE(first_child), g_type_from_name("AdwToolbarView"))) {
-                    box_container = gtk_widget_get_first_child(first_child);
-                }
-                
-                if (GTK_IS_BOX(box_container)) {
-                    // Indsæt vores toolbar først i box containeren
-                    gtk_box_prepend(GTK_BOX(box_container), toolbar_container);
-                    g_debug("Added new toolbar container to window");
-                } else {
-                    g_critical("Unexpected widget hierarchy in window\n");
-                }
-            } else {
-                g_critical("Kunne ikke finde den forventede widget-struktur i window\n");
-            }
-        } else {
-            g_critical("FEJL: Måtte oprette fallback toolbar container!\n");
-        }
+        g_debug("Created fallback toolbar container");
     }
     
-    // Fjern eksisterende børn
+    // Clear existing children
     GtkWidget *child = gtk_widget_get_first_child(toolbar_container);
     while (child) {
         GtkWidget *next = gtk_widget_get_next_sibling(child);
@@ -403,76 +527,59 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
         child = next;
     }
     
-    // Opret knapper
-    GtkWidget *italic_button = gtk_button_new_with_label("Kursiv");
-    GtkWidget *bold_button = gtk_button_new_with_label("Fed");
-    GtkWidget *code_button = gtk_button_new_with_label("Kode");
-    GtkWidget *hr_button = gtk_button_new_with_label("Horisontal streg");
-    GtkWidget *heading_button = gtk_menu_button_new();
-    gtk_menu_button_set_label(GTK_MENU_BUTTON(heading_button), "Overskrifter");
+    // Create buttons
+    toolbar_state.italic_button = GTK_BUTTON(gtk_button_new_with_label("Kursiv"));
+    toolbar_state.bold_button = GTK_BUTTON(gtk_button_new_with_label("Fed"));
+    toolbar_state.code_button = GTK_BUTTON(gtk_button_new_with_label("Kode"));
+    toolbar_state.hr_button = GTK_BUTTON(gtk_button_new_with_label("HR"));
+    toolbar_state.heading_button = GTK_BUTTON(gtk_menu_button_new());
+    toolbar_state.source_view_button = GTK_BUTTON(gtk_button_new());
     
-    // Tilføj tooltips
-    gtk_widget_set_tooltip_text(italic_button, "Sæt tekst i kursiv");
-    gtk_widget_set_tooltip_text(bold_button, "Sæt tekst med fed skrift");
-    gtk_widget_set_tooltip_text(code_button, "Indsæt inline kode (`) eller kodeblok (```) - automatisk valg baseret på indhold");
-    gtk_widget_set_tooltip_text(hr_button, "Indsæt horisontal streg");
-    gtk_widget_set_tooltip_text(heading_button, "Vælg overskriftstype");
+    // Create icon for source view button
+    GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
+    gtk_button_set_child(toolbar_state.source_view_button, source_icon);
     
-    // Tilføj signal handlers
-    g_signal_connect(italic_button, "clicked", G_CALLBACK(on_italic_button_clicked), text_view);
-    g_signal_connect(bold_button, "clicked", G_CALLBACK(on_bold_button_clicked), text_view);
-    g_signal_connect(code_button, "clicked", G_CALLBACK(on_code_button_clicked), text_view);
-    g_signal_connect(hr_button, "clicked", G_CALLBACK(on_hr_button_clicked), text_view);
+    // Set accessible name for screen readers
+    gtk_accessible_update_property(GTK_ACCESSIBLE(toolbar_state.source_view_button),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, _("Source view toggle"),
+                                   -1);
     
-    // Opsæt heading dropdown menu
-    setup_heading_menu(heading_button, text_view);
+    gtk_menu_button_set_label(GTK_MENU_BUTTON(toolbar_state.heading_button), "Overskrifter");
     
-    // Tilføj knapper til toolbar
-    gtk_box_append(GTK_BOX(toolbar_container), italic_button);
-    gtk_box_append(GTK_BOX(toolbar_container), bold_button);
-    gtk_box_append(GTK_BOX(toolbar_container), code_button);
+    // Set tooltips
+    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.italic_button), "Sæt tekst i kursiv");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.bold_button), "Sæt tekst med fed skrift");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.code_button), "Indsæt inline kode eller kodeblok");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.hr_button), "Indsæt horisontal streg");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.heading_button), "Vælg overskriftstype");
+    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), _("Switch to source view"));
     
-    // Separator
+    // Add buttons to container
+    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.italic_button));
+    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.bold_button));
+    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.code_button));
+    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.hr_button));
+    
+    // Add separator
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_set_margin_start(separator, 6);
     gtk_widget_set_margin_end(separator, 6);
     gtk_box_append(GTK_BOX(toolbar_container), separator);
     
-    // Overskriftsknap
-    gtk_box_append(GTK_BOX(toolbar_container), heading_button);
+    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.heading_button));
     
-    // Separator
-    separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
-    gtk_widget_set_margin_start(separator, 6);
-    gtk_widget_set_margin_end(separator, 6);
-    gtk_box_append(GTK_BOX(toolbar_container), separator);
+    // Add another separator for view toggle
+    GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+    gtk_widget_set_margin_start(separator2, 6);
+    gtk_widget_set_margin_end(separator2, 6);
+    gtk_box_append(GTK_BOX(toolbar_container), separator2);
     
-    // Horisontal streg knap
-    gtk_box_append(GTK_BOX(toolbar_container), hr_button);
+    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.source_view_button));
     
-    // Sørg for at toolbaren er synlig med god størrelse
-    gtk_widget_set_visible(toolbar_container, TRUE);
-    gtk_widget_set_hexpand(toolbar_container, TRUE);
-    gtk_widget_set_margin_start(toolbar_container, 8);
-    gtk_widget_set_margin_end(toolbar_container, 8);
-    gtk_widget_set_margin_top(toolbar_container, 6);
-    gtk_widget_set_margin_bottom(toolbar_container, 6);
+    // Connect all signals
+    toolbar_connect_signals(&toolbar_state, toolbar_state.text_view);
+    setup_heading_menu(GTK_WIDGET(toolbar_state.heading_button), GTK_WIDGET(toolbar_state.text_view));
     
-    // Gør knapper mere synlige
-    child = gtk_widget_get_first_child(toolbar_container);
-    while (child) {
-        if (GTK_IS_BUTTON(child) || GTK_IS_MENU_BUTTON(child)) {
-            gtk_widget_set_margin_start(child, 2);
-            gtk_widget_set_margin_end(child, 2);
-            gtk_widget_set_size_request(child, 80, 32);
-        }
-        child = gtk_widget_get_next_sibling(child);
-    }
-    
-    // Debug udskrift
-    g_message("Toolbar created with %d buttons", 
-        g_list_model_get_n_items(gtk_widget_observe_children(toolbar_container)));
-    g_message("Toolbar is visible and active");
-    
+    g_debug("Toolbar created successfully");
     return toolbar_container;
 }

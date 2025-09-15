@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2025-09-15
+
+### Fixed
+- Fixed "Normal tekst" option to correctly detect and remove heading formatting from rendered text
+
+## [0.3.6] - 2025-09-15
+
+### Fixed
+- Fixed "Normal tekst" option to properly remove heading formatting instead of adding Heading 1
+
+## [0.3.5] - 2025-09-15
+
+### Fixed
+- Fixed heading toolbar buttons to trigger re-rendering immediately when applied
+
+## [0.3.4] - 2025-09-15
+
+### Fixed
+- Fixed heading formatting to preserve tight spacing between consecutive headings
+
+## [0.3.3] - 2025-09-15
+
+### Fixed
+- main.c: Fixed space key causing unwanted line breaks by making live reparse selective
+- main.c: Live reparse now only triggers for specific markdown characters (#, *, _, `, newline)
+- main.c: Fixed normal typing behavior - spaces no longer interfere with text input
+- toolbar.c: Completely rewrote source view toggle with proper widget lifecycle management
+- toolbar.c: Fixed source view crashes after multiple toggles by creating fresh widgets each time
+- toolbar.c: Added proper widget cleanup and validation to prevent GTK assertion failures
+
+## [0.3.2] - 2025-09-15
+
+### Fixed
+- main.c: Fixed heading rendering not working when typing #, ##, ### directly in WYSIWYG view
+- main.c: Added live markdown reparse to on_text_changed callback for immediate heading formatting
+- toolbar.c: Fixed source view crashes on second toggle by properly managing widget references
+- toolbar.c: Redesigned view swapping to use stored scrolled_window and original_text_view references
+- toolbar.c: Fixed GTK widget assertion failures when switching between WYSIWYG and source modes
+
+## [0.3.1] - 2025-09-15
+
+### Fixed
+- toolbar.c: Fixed critical GTK widget assertion crashes when using source view toggle
+- toolbar.c: Fixed segmentation fault in heading button handlers (1-6)
+- toolbar.c: Corrected heading button data storage from integers to proper markdown strings
+- toolbar.c: Removed unsafe manual widget reference management in view swapping
+- toolbar.c: Added proper widget validity checks in source view creation
+- toolbar.c: Fixed heading insertion to work at cursor position instead of selection
+
 ## [0.3.0] - 2025-09-15
 
 ### Added

@@ -1,4 +1,10 @@
-/* [0.2.0] - 2025-09-15 - src/cmrender.c
+/* C ULTRA‑MIN TEMPLATE
+   Purpose: CommonMark markdown rendering engine with GTK text buffer integration
+   Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
+   TODO: Restructure to follow Ultra-Min template sections
+   [0.3.4] Fixed heading formatting to preserve tight spacing between consecutive headings
+*/
+/* [0.3.0] - 2025-09-15 - src/cmrender.c
  * Changed: Added proper input validation with g_return_if_fail().
  */
 #include <gtktext/cmrender.h>
@@ -767,6 +773,7 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             break;
         case CMARK_NODE_HEADING:
             // Headings should not force a blank line; keep a single trailing newline
+            // But avoid extra spacing when followed by another heading
             is_block_node = TRUE;
             needs_trailing_newline = TRUE;
             break;
@@ -1248,7 +1255,11 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             int end_line = cmark_node_get_end_line(node);
             int next_start = cmark_node_get_start_line(next_sibling);
             gap = next_start - end_line - 1; // number of blank lines in source
-            if (gap > 0) {
+
+            // Special case: For consecutive headings with no gap, don't add extra newlines
+            if (gap == 0 && type == CMARK_NODE_HEADING && cmark_node_get_type(next_sibling) == CMARK_NODE_HEADING) {
+                // Do nothing - the single trailing newline is sufficient
+            } else if (gap > 0) {
                 for (int i = 0; i < gap; i++) {
                     gtk_text_buffer_insert(buffer, iter, "\n", -1);
                 }
