@@ -398,15 +398,13 @@ static void zoom_text_view(GtkTextView *text_view, gboolean zoom_in) {
     
     // Apply zoom via CSS using modern API with proper formatting
     // Use integer scaling in percentage to avoid locale decimal issues
-    GtkCssProvider *provider = gtk_css_provider_new();
+    g_autoptr(GtkCssProvider) provider = gtk_css_provider_new();
     gint zoom_percent = (gint)(current_zoom * 100.0);
-    gchar *css = g_strdup_printf("textview { font-size: %d%%; }", zoom_percent);
+    g_autofree gchar *css = g_strdup_printf("textview { font-size: %d%%; }", zoom_percent);
     gtk_css_provider_load_from_string(provider, css);
     gtk_style_context_add_provider_for_display(gdk_display_get_default(),
                                                 GTK_STYLE_PROVIDER(provider),
                                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(provider);
-    g_free(css);
     
     // Store updated zoom level
     gdouble *zoom_ptr = g_malloc(sizeof(gdouble));
@@ -1344,23 +1342,21 @@ static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath) {
     }
     
     // Always convert current buffer content to markdown
-    char *md = cm_render_buffer_to_markdown(buffer);
+    g_autofree char *md = cm_render_buffer_to_markdown(buffer);
     if (!md) {
         g_warning("Cannot save: Failed to convert buffer to markdown");
         return;
     }
-    
+
     // Save to file
-    GError *error = NULL;
+    g_autoptr(GError) error = NULL;
     if (!g_file_set_contents(filepath, md, -1, &error)) {
         g_warning("Error saving file to %s: %s", filepath, error->message);
-        g_clear_error(&error);
     } else {
         g_message("Buffer saved as markdown to: %s", filepath);
         // Reset dirty flag since we've saved
         g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
     }
-    g_free(md);
 }
 
 // Determines the full path for the save file.
@@ -1386,22 +1382,19 @@ static void save_buffer_as_markdown(GtkTextBuffer *buffer) {
     }
     
     // Always convert current buffer content to markdown
-    char *md = cm_render_buffer_to_markdown(buffer);
+    g_autofree char *md = cm_render_buffer_to_markdown(buffer);
     if (!md) {
         g_warning("Cannot save: Failed to convert buffer to markdown");
         return;
     }
-    
+
     // Save to file
-    GError *error = NULL;
+    g_autoptr(GError) error = NULL;
     if (!g_file_set_contents(filename, md, -1, &error)) {
         g_warning("Error saving file: %s", error->message);
-        g_clear_error(&error);
     } else {
         g_print("Buffer saved as markdown to: %s\n", filename);
     }
-    
-    g_free(md);
 }
 
 // Callback triggered when the text in the GtkTextBuffer changes.
@@ -1720,12 +1713,11 @@ static gboolean on_key_pressed(G_GNUC_UNUSED GtkEventControllerKey *controller,
         // Reset zoom: Ctrl+0/KP_0
         else if (keyval == GDK_KEY_0 || keyval == GDK_KEY_KP_0) {
             // Reset zoom to 100%
-            GtkCssProvider *provider = gtk_css_provider_new();
+            g_autoptr(GtkCssProvider) provider = gtk_css_provider_new();
             gtk_css_provider_load_from_string(provider, "textview { font-size: 100%; }");
             gtk_style_context_add_provider_for_display(gdk_display_get_default(),
                                                         GTK_STYLE_PROVIDER(provider),
                                                         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-            g_object_unref(provider);
             gdouble *zoom_ptr = g_malloc(sizeof(gdouble));
             *zoom_ptr = 1.0;
             g_object_set_data_full(G_OBJECT(text_view), "zoom-level", zoom_ptr, g_free);
@@ -1978,7 +1970,7 @@ static void app_open(GApplication *application, GFile **files, gint n_files, G_G
     if (n_files > 0) {
         // Open the first file (ignore additional files for now)
         GFile *file = files[0];
-        gchar *path = g_file_get_path(file);
+        g_autofree gchar *path = g_file_get_path(file);
         
         if (path) {
             g_message("Opening file: %s", path);
@@ -1991,10 +1983,10 @@ static void app_open(GApplication *application, GFile **files, gint n_files, G_G
                     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
                     
                     // Load file content
-                    gchar *contents = NULL;
+                    g_autofree gchar *contents = NULL;
                     gsize length = 0;
-                    GError *error = NULL;
-                    
+                    g_autoptr(GError) error = NULL;
+
                     if (g_file_get_contents(path, &contents, &length, &error)) {
                         // Set the content in the buffer
                         gtk_text_buffer_set_text(buffer, contents, length);
@@ -2004,11 +1996,9 @@ static void app_open(GApplication *application, GFile **files, gint n_files, G_G
                                              g_strdup(path), g_free);
                         
                         // Update window title
-                        gchar *basename = g_path_get_basename(path);
-                        gchar *title = g_strdup_printf("GTK Text - %s", basename);
+                        g_autofree gchar *basename = g_path_get_basename(path);
+                        g_autofree gchar *title = g_strdup_printf("GTK Text - %s", basename);
                         gtk_window_set_title(window, title);
-                        g_free(basename);
-                        g_free(title);
                         
                         // Trigger markdown parsing
                         schedule_reparse_markdown(buffer, 0, NULL);
@@ -2020,14 +2010,11 @@ static void app_open(GApplication *application, GFile **files, gint n_files, G_G
                         }
                         
                         g_message("Successfully loaded file: %s", path);
-                        g_free(contents);
                     } else {
                         g_warning("Failed to load file %s: %s", path, error->message);
-                        g_error_free(error);
                     }
                 }
             }
-            g_free(path);
         }
     }
 }

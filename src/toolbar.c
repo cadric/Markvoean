@@ -115,9 +115,8 @@ static void on_code_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
     
     if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
         // Check if selection is multiline
-        gchar *selected_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+        g_autofree gchar *selected_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
         gboolean is_multiline = (strchr(selected_text, '\n') != NULL);
-        g_free(selected_text);
         
         if (is_multiline) {
             // Handle code block formatting

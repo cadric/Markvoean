@@ -530,9 +530,9 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     // Try to get the associated text view to lookup theme colors
     GtkWidget *text_view = g_object_get_data(G_OBJECT(buffer), "gtktext-view");
     GdkRGBA code_bg_rgba, code_fg_rgba, codeblock_bg_rgba;
-    char *code_bg_color_str = NULL;
-    char *code_fg_color_str = NULL;
-    char *codeblock_bg_color_str = NULL;
+    g_autofree char *code_bg_color_str = NULL;
+    g_autofree char *code_fg_color_str = NULL;
+    g_autofree char *codeblock_bg_color_str = NULL;
     
     if (text_view) {
         // Try different GNOME red color names for inline code
@@ -564,10 +564,10 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
             if (get_theme_color_with_alpha(text_view, red_color_names[i], is_dark ? 0.3 : 0.2, &code_bg_rgba)) {
                 // Convert RGBA to string - use integer alpha to avoid locale decimal issues
                 int alpha_int = (int)(code_bg_rgba.alpha * 1000); // Convert to integer (0.2 -> 200)
-                code_bg_color_str = g_strdup_printf("rgba(%d,%d,%d,0.%03d)", 
-                                                    (int)(code_bg_rgba.red * 255), 
-                                                    (int)(code_bg_rgba.green * 255), 
-                                                    (int)(code_bg_rgba.blue * 255), 
+                code_bg_color_str = g_strdup_printf("rgba(%d,%d,%d,0.%03d)",
+                                                    (int)(code_bg_rgba.red * 255),
+                                                    (int)(code_bg_rgba.green * 255),
+                                                    (int)(code_bg_rgba.blue * 255),
                                                     alpha_int);
                 break;
             }
@@ -679,10 +679,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     else { stripe_rgba.red=0.7; stripe_rgba.green=0.7; stripe_rgba.blue=0.7; stripe_rgba.alpha=1.0; }
     g_object_set(stripe, "background-rgba", &stripe_rgba, NULL);
     
-    // Cleanup dynamically allocated color strings
-    g_free(code_bg_color_str);
-    g_free(code_fg_color_str);
-    g_free(codeblock_bg_color_str);
+    // Color strings are automatically cleaned up with g_autofree
 }
 
 static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter *iter, const char *text, GSList *active_tags) {
@@ -1552,11 +1549,9 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
     GString *md = g_string_new("");
     
     // Check user preference for heading format once at the beginning
-    GSettings *settings = g_settings_new("org.gtk.gtktext");
-    gchar *heading_format = g_settings_get_string(settings, "heading-format");
+    g_autoptr(GSettings) settings = g_settings_new("org.gtk.gtktext");
+    g_autofree gchar *heading_format = g_settings_get_string(settings, "heading-format");
     gboolean use_setext = g_strcmp0(heading_format, "setext") == 0;
-    g_free(heading_format);
-    g_object_unref(settings);
     
     GtkTextIter iter;
     gtk_text_buffer_get_start_iter(buffer, &iter);
