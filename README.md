@@ -22,12 +22,32 @@ Run the dependency installation script:
 
 ### Building
 
-```bash
-# Navigate to the project directory
-cd gtktext
+#### Quick Development Workflow
 
-# Build the project
-make
+```bash
+# Build, test, and run in one command
+./build-and-run.sh
+
+# Or use separate scripts:
+./build.sh          # Just build
+./run.sh            # Just run (after building)
+```
+
+#### Manual Build Commands
+
+```bash
+# Set up build directory (first time only)
+meson setup builddir
+
+# Build
+meson compile -C builddir
+
+# Run tests
+meson test -C builddir
+
+# Run application
+GSETTINGS_SCHEMA_DIR=./data ./builddir/src/gtktext
+```
 
 # Run the application
 ./bin/gtktext
@@ -36,7 +56,7 @@ make
 ### Running Tests
 
 ```bash
-make test
+meson test -C builddir
 ```
 
 ## Project Structure
@@ -57,11 +77,21 @@ gtktext/
 ├── po/                 # Translation files
 ├── tests/              # Unit tests
 │   └── test_cmark.c
-├── data/               # App icons, .desktop files
+```
+gtktext/
+├── src/                # Source code
+├── include/            # Header files
+├── ui/                 # GTK UI files (.ui)
+├── data/               # App icons, .desktop files, GSettings schema
 │   └── icons/
+├── tests/              # Test files
 ├── scripts/            # Helper scripts
-├── README.md
-└── Makefile
+├── builddir/           # Meson build directory
+├── meson.build         # Main build configuration
+├── build-and-run.sh    # Quick build, test, and run script
+├── build.sh            # Quick build script
+├── run.sh              # Quick run script
+└── README.md
 ```
 
 ## Contributing

@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <gtk/gtk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <gio/gio.h>
@@ -103,7 +106,7 @@ static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, 
 static void copy_selected_text_as_markdown(GtkTextView *text_view); // Removed __attribute__((unused))
 static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void app_activate(GApplication *application); // Changed G_APPLICATION to GApplication
-static void app_open(GApplication *application, GFile **files, gint n_files, const gchar *hint);
+static void app_open(GApplication *application, GFile **files, gint n_files, G_GNUC_UNUSED const gchar *hint);
 
 // For link handling
 static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y, gboolean keyboard_mode, GtkTooltip *tooltip, gpointer user_data);
@@ -1963,7 +1966,7 @@ static void app_activate(GApplication *application) {
     // Den frigives, når window ødelægges
 }
 
-static void app_open(GApplication *application, GFile **files, gint n_files, const gchar *hint) {
+static void app_open(GApplication *application, GFile **files, gint n_files, G_GNUC_UNUSED const gchar *hint) {
     // First activate the application to ensure window is created
     app_activate(application);
     
