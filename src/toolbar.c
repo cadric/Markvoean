@@ -85,6 +85,93 @@ static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
     }
 }
 
+static void on_code_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+    GtkTextIter start, end;
+    
+    // Get the tag table
+    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
+    GtkTextTag *code_tag = gtk_text_tag_table_lookup(tag_table, "code");
+    GtkTextTag *codeblock_tag = gtk_text_tag_table_lookup(tag_table, "codeblock");
+    
+    // Create tags if they don't exist (following cmrender.c pattern)
+    if (!code_tag) {
+        code_tag = gtk_text_buffer_create_tag(buffer, "code", 
+                                             "family", "monospace",
+                                             NULL);
+        ensure_tag_name_stored(code_tag, "code");
+    }
+    
+    if (!codeblock_tag) {
+        codeblock_tag = gtk_text_buffer_create_tag(buffer, "codeblock",
+                                                  "family", "monospace",
+                                                  NULL);
+        ensure_tag_name_stored(codeblock_tag, "codeblock");
+    }
+    
+    if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
+        // Check if selection is multiline
+        gchar *selected_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+        gboolean is_multiline = (strchr(selected_text, '\n') != NULL);
+        g_free(selected_text);
+        
+        if (is_multiline) {
+            // Handle code block formatting
+            gboolean fully_codeblock = TRUE;
+            GtkTextIter iter = start;
+            while (!gtk_text_iter_equal(&iter, &end)) {
+                if (!gtk_text_iter_has_tag(&iter, codeblock_tag)) {
+                    fully_codeblock = FALSE;
+                    break;
+                }
+                gtk_text_iter_forward_char(&iter);
+            }
+            
+            if (fully_codeblock) {
+                gtk_text_buffer_remove_tag(buffer, codeblock_tag, &start, &end);
+            } else {
+                gtk_text_buffer_apply_tag(buffer, codeblock_tag, &start, &end);
+            }
+        } else {
+            // Handle inline code formatting
+            gboolean fully_code = TRUE;
+            GtkTextIter iter = start;
+            while (!gtk_text_iter_equal(&iter, &end)) {
+                if (!gtk_text_iter_has_tag(&iter, code_tag)) {
+                    fully_code = FALSE;
+                    break;
+                }
+                gtk_text_iter_forward_char(&iter);
+            }
+            
+            if (fully_code) {
+                gtk_text_buffer_remove_tag(buffer, code_tag, &start, &end);
+            } else {
+                gtk_text_buffer_apply_tag(buffer, code_tag, &start, &end);
+            }
+        }
+        
+        // Trigger immediate reparse for visual update
+        schedule_reparse_markdown(buffer, 0, &start);
+    } else {
+        // No selection - insert inline code template and position cursor inside
+        GtkTextMark *cursor_mark = gtk_text_buffer_get_insert(buffer);
+        gtk_text_buffer_get_iter_at_mark(buffer, &start, cursor_mark);
+        
+        // Insert `` with cursor positioned in between
+        gtk_text_buffer_insert(buffer, &start, "``", -1);
+        
+        // Move cursor back one position to be between the backticks
+        gtk_text_buffer_get_iter_at_mark(buffer, &start, cursor_mark);
+        gtk_text_iter_backward_char(&start);
+        gtk_text_buffer_place_cursor(buffer, &start);
+        
+        // Trigger immediate reparse for visual update
+        schedule_reparse_markdown(buffer, 2, &start);
+    }
+}
+
 static void on_hr_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
@@ -136,6 +223,9 @@ static void on_hr_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_
     
     // Fjern det midlertidige mark
     gtk_text_buffer_delete_mark(buffer, start_mark);
+    
+    // Trigger immediate re-rendering to show the HR formatting
+    schedule_reparse_markdown(buffer, 5, &insert); // 3 for "---" + 2 for newlines
 }
 
 static void on_heading_button_clicked(GtkButton *button, gpointer user_data) {
@@ -306,6 +396,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     // Opret knapper
     GtkWidget *italic_button = gtk_button_new_with_label("Kursiv");
     GtkWidget *bold_button = gtk_button_new_with_label("Fed");
+    GtkWidget *code_button = gtk_button_new_with_label("Kode");
     GtkWidget *hr_button = gtk_button_new_with_label("Horisontal streg");
     GtkWidget *heading_button = gtk_menu_button_new();
     gtk_menu_button_set_label(GTK_MENU_BUTTON(heading_button), "Overskrifter");
@@ -313,12 +404,14 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     // Tilføj tooltips
     gtk_widget_set_tooltip_text(italic_button, "Sæt tekst i kursiv");
     gtk_widget_set_tooltip_text(bold_button, "Sæt tekst med fed skrift");
+    gtk_widget_set_tooltip_text(code_button, "Indsæt inline kode (`) eller kodeblok (```) - automatisk valg baseret på indhold");
     gtk_widget_set_tooltip_text(hr_button, "Indsæt horisontal streg");
     gtk_widget_set_tooltip_text(heading_button, "Vælg overskriftstype");
     
     // Tilføj signal handlers
     g_signal_connect(italic_button, "clicked", G_CALLBACK(on_italic_button_clicked), text_view);
     g_signal_connect(bold_button, "clicked", G_CALLBACK(on_bold_button_clicked), text_view);
+    g_signal_connect(code_button, "clicked", G_CALLBACK(on_code_button_clicked), text_view);
     g_signal_connect(hr_button, "clicked", G_CALLBACK(on_hr_button_clicked), text_view);
     
     // Opsæt heading dropdown menu
@@ -327,6 +420,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     // Tilføj knapper til toolbar
     gtk_box_append(GTK_BOX(toolbar_container), italic_button);
     gtk_box_append(GTK_BOX(toolbar_container), bold_button);
+    gtk_box_append(GTK_BOX(toolbar_container), code_button);
     
     // Separator
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
@@ -368,6 +462,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     // Debug udskrift
     g_message("Toolbar created with %d buttons", 
         g_list_model_get_n_items(gtk_widget_observe_children(toolbar_container)));
+    g_message("Toolbar is visible and active");
     
     return toolbar_container;
 }

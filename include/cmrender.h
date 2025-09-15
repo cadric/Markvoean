@@ -35,8 +35,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
 void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer);
 
 /**
- * @brief Exports the content of a GtkTextBuffer to a CommonMark string.
- *
+ * @brief Exports the content of a GtkTextBuffer back to CommonMark.
  * (Placeholder for porting export_buffer_to_markdown_cmark logic)
  *
  * @param buffer The GtkTextBuffer to export.
@@ -45,5 +44,17 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer);
  *         Returns an empty string if the buffer is NULL or empty.
  */
 char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer);
+
+/**
+ * @brief Schedules a re-parse of the entire buffer to update markdown rendering.
+ * 
+ * This function schedules a delayed re-rendering of the markdown content in the buffer.
+ * It's useful for updating the visual appearance after inserting markdown text.
+ *
+ * @param buffer The GtkTextBuffer to re-parse.
+ * @param inserted_len Length of inserted text (for cursor positioning).
+ * @param at_iter Position where text was inserted (for cursor positioning).
+ */
+void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const GtkTextIter *at_iter);
 
 #endif // CMRENDER_H

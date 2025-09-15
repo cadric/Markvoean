@@ -1,5 +1,7 @@
 #include <gtk/gtk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gio/gio.h>
+#include <glib/gstdio.h>
 #ifdef HAVE_LIBSOUP
 #include <libsoup/soup.h>
 #endif
@@ -22,9 +24,77 @@ static GSettings *app_settings = NULL;    // org.gtk.gtktext settings
 static const char *DATA_SUPPRESS_PARSE = "gtktext-suppress-reparse";
 static const char *DATA_REPARSE_SOURCE_ID = "gtktext-reparse-source-id";
 static const char *DATA_REPARSE_TARGET_OFFSET = "gtktext-reparse-target-offset";
+// Track if user has edited buffer contents since last load
+static const char *DATA_USER_DIRTY = "gtktext-user-dirty";
+// Preserve original text exactly to allow no-op save when unmodified
+static const char *DATA_ORIGINAL_TEXT = "gtktext-original-md";
+
+// Try to make development runs work without manually exporting GSETTINGS_SCHEMA_DIR.
+// If a compiled schema exists under ./data (or ../data), set the env var automatically.
+// If not compiled but the XML exists, attempt to compile it with glib-compile-schemas.
+static void maybe_setup_gsettings_schemas(void) {
+    const char *already = g_getenv("GSETTINGS_SCHEMA_DIR");
+    if (already && *already) return; // Respect user's explicit choice
+
+    const char *candidates[] = { "./data", "../data", NULL };
+    for (int i = 0; candidates[i]; i++) {
+        const char *dir = candidates[i];
+        g_autofree char *compiled = g_build_filename(dir, "gschemas.compiled", NULL);
+        g_autofree char *xml = g_build_filename(dir, "org.gtk.gtktext.gschema.xml", NULL);
+        if (g_file_test(compiled, G_FILE_TEST_EXISTS)) {
+            gboolean needs_recompile = FALSE;
+            if (g_file_test(xml, G_FILE_TEST_EXISTS)) {
+                GStatBuf st_xml = {0}, st_comp = {0};
+                if (g_stat(xml, &st_xml) == 0 && g_stat(compiled, &st_comp) == 0) {
+                    if (st_xml.st_mtime > st_comp.st_mtime) {
+                        needs_recompile = TRUE;
+                    }
+                }
+            }
+            if (needs_recompile) {
+                g_message("Recompiling GSettings schemas under %s (XML newer)", dir);
+                gchar *argv[] = { "glib-compile-schemas", (gchar*)dir, NULL };
+                gint status = 0; GError *err = NULL;
+                if (!g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, &err)) {
+                    g_warning("Failed to spawn glib-compile-schemas: %s", err ? err->message : "unknown error");
+                    g_clear_error(&err);
+                }
+            }
+            g_setenv("GSETTINGS_SCHEMA_DIR", dir, TRUE);
+            g_message("Using local GSettings schemas at %s", dir);
+            return;
+        }
+    }
+
+    // Try to compile schemas if XML is present and tool is available
+    for (int i = 0; candidates[i]; i++) {
+        const char *dir = candidates[i];
+        g_autofree char *xml = g_build_filename(dir, "org.gtk.gtktext.gschema.xml", NULL);
+        if (!g_file_test(xml, G_FILE_TEST_EXISTS)) continue;
+
+        g_message("Compiling GSettings schemas under %s", dir);
+        gchar *argv[] = { "glib-compile-schemas", (gchar*)dir, NULL };
+        gint status = 0; GError *err = NULL;
+        if (g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, &err)) {
+            if (status == 0) {
+                g_autofree char *compiled = g_build_filename(dir, "gschemas.compiled", NULL);
+                if (g_file_test(compiled, G_FILE_TEST_EXISTS)) {
+                    g_setenv("GSETTINGS_SCHEMA_DIR", dir, TRUE);
+                    g_message("Compiled and using local GSettings schemas at %s", dir);
+                    return;
+                }
+            } else {
+                g_debug("glib-compile-schemas exited with status %d", status);
+            }
+        } else {
+            g_debug("Failed to spawn glib-compile-schemas: %s", err ? err->message : "unknown error");
+            g_clear_error(&err);
+        }
+    }
+    // If nothing worked, we fall back to system schemas; app may run without settings.
+}
 
 // Forward decls
-static void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const GtkTextIter *at_iter);
 static gboolean reparse_markdown_cb(gpointer user_data);
 static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, gchar *text, gint len, gpointer user_data);
 
@@ -33,6 +103,7 @@ static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, 
 static void copy_selected_text_as_markdown(GtkTextView *text_view); // Removed __attribute__((unused))
 static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void app_activate(GApplication *application); // Changed G_APPLICATION to GApplication
+static void app_open(GApplication *application, GFile **files, gint n_files, const gchar *hint);
 
 // For link handling
 static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y, gboolean keyboard_mode, GtkTooltip *tooltip, gpointer user_data);
@@ -40,12 +111,59 @@ static void on_text_view_link_clicked(GtkGestureClick *gesture, gint n_press, gd
 
 // Forward decls for static funcs defined later
 static void save_buffer_as_markdown(GtkTextBuffer *buffer);
+static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath);
+static void action_save_as_cb(GSimpleAction *a, GVariant *p, gpointer user_data);
+static void autosave_buffer(GtkTextBuffer *buffer);
+static void setup_file_dialog_filters(GtkFileDialog *dialog);
+static void setup_save_dialog_filters(GtkFileDialog *dialog);
 
 // Image embedding helpers
 static void embed_images_in_text_view(GtkTextView *text_view);
 static void on_embedded_image_pressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer user_data);
 static void on_picture_paintable_notify(GObject *object, GParamSpec *pspec, gpointer user_data);
 static void free_user_data_notify(gpointer data, GClosure *closure);
+// Blockquote overlay drawing
+static void on_bq_overlay_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data);
+static void setup_blockquote_overlay(GtkTextView *text_view);
+typedef struct { GPtrArray *arr; } TagCollect;
+static void collect_bq(GtkTextTag *tag, gpointer user_data);
+
+// Debug helper: window/display/environment info for diagnosing dialog layout issues
+static void debug_dump_window_env(GtkWindow *parent, const char *phase) {
+    const char *dbg = g_getenv("G_MESSAGES_DEBUG");
+    if (!dbg || !*dbg) return; // only emit when debug logging is enabled
+    if (!parent) {
+        g_debug("[file-dialog:%s] parent=(null)", phase);
+        return;
+    }
+    GtkWidget *pw = GTK_WIDGET(parent);
+    GdkDisplay *display = gtk_widget_get_display(pw);
+    const char *display_name = display ? gdk_display_get_name(display) : "(null)";
+    int scale = gtk_widget_get_scale_factor(pw);
+    GtkNative *native = gtk_widget_get_native(pw);
+    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
+    int sw = surface ? gdk_surface_get_width(surface) : -1;
+    int sh = surface ? gdk_surface_get_height(surface) : -1;
+    gboolean mapped = gtk_widget_get_mapped(pw);
+    gboolean visible = gtk_widget_get_visible(pw);
+    g_debug("[file-dialog:%s] display='%s' scale=%d surface=%dx%d mapped=%d visible=%d",
+            phase, display_name, scale, sw, sh, mapped, visible);
+    const char *backend_env = g_getenv("GDK_BACKEND");
+    const char *portal_env = g_getenv("GTK_USE_PORTAL");
+    g_debug("[file-dialog:%s] env GDK_BACKEND=%s GTK_USE_PORTAL=%s",
+            phase,
+            backend_env ? backend_env : "(unset)",
+            portal_env ? portal_env : "(unset)");
+}
+
+// Zoom functionality
+static void zoom_text_view(GtkTextView *text_view, gboolean zoom_in);
+static gboolean on_scroll_event(GtkEventControllerScroll *controller, gdouble dx, gdouble dy, gpointer user_data);
+
+// Color helper function
+gboolean get_theme_color_with_alpha(GtkWidget *widget, const char *color_name, gdouble alpha, GdkRGBA *result);
+
+// (Removed) Codeblock border overlay functionality
 
 // Click handler for embedded images: opens the image URL via GtkUriLauncher
 static void on_embedded_image_pressed(G_GNUC_UNUSED GtkGestureClick *gesture, G_GNUC_UNUSED gint n_press, G_GNUC_UNUSED gdouble x, G_GNUC_UNUSED gdouble y, gpointer user_data) {
@@ -80,6 +198,237 @@ static void free_user_data_notify(gpointer data, GClosure *closure) {
     (void)closure;
     g_free(data);
 }
+
+// Helper to queue redraw when scrolling changes
+static void on_adjustment_changed(GObject *adj, GParamSpec *pspec, gpointer user_data) {
+    (void)adj; (void)pspec;
+    GtkDrawingArea *area = GTK_DRAWING_AREA(user_data);
+    if (GTK_IS_WIDGET(area)) {
+        gtk_widget_queue_draw(GTK_WIDGET(area));
+    }
+}
+
+static void setup_blockquote_overlay(GtkTextView *text_view) {
+    if (!text_view) return;
+    GtkWidget *tv = GTK_WIDGET(text_view);
+    GtkWidget *parent = gtk_widget_get_parent(tv);
+    if (!GTK_IS_SCROLLED_WINDOW(parent)) return;
+
+    // Create overlay and drawing area
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_widget_set_hexpand(overlay, TRUE);
+    gtk_widget_set_vexpand(overlay, TRUE);
+
+    // Reparent text_view under overlay
+    gtk_widget_unparent(tv);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(parent), overlay);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), tv);
+
+    GtkWidget *area = gtk_drawing_area_new();
+    gtk_widget_set_hexpand(area, TRUE);
+    gtk_widget_set_vexpand(area, TRUE);
+    gtk_widget_set_can_target(area, FALSE);  // Allow events to pass through
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), area);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), on_bq_overlay_draw, text_view, NULL);
+
+    // Redraw on scroll adjustments
+    GtkAdjustment *hadj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(parent));
+    GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(parent));
+    g_signal_connect(hadj, "value-changed", G_CALLBACK(on_adjustment_changed), area);
+    g_signal_connect(vadj, "value-changed", G_CALLBACK(on_adjustment_changed), area);
+
+    // Keep pointers for later if needed
+    g_object_set_data(G_OBJECT(tv), "bq-overlay", overlay);
+    g_object_set_data(G_OBJECT(tv), "bq-area", area);
+}
+
+// Draw thin left borders for visible blockquote ranges
+static void on_bq_overlay_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    (void)area; (void)width; (void)height;
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    if (!text_view) return;
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+    GtkTextTagTable *table = gtk_text_buffer_get_tag_table(buffer);
+
+    // Determine visible region in buffer coords
+    GdkRectangle vis;
+    gtk_text_view_get_visible_rect(text_view, &vis);
+
+    GtkTextIter vis_start, vis_end;
+    gtk_text_view_get_iter_at_location(text_view, &vis_start, vis.x, vis.y);
+    gtk_text_view_get_iter_at_location(text_view, &vis_end, vis.x + vis.width, vis.y + vis.height);
+
+    // Use theme-aware color for blockquote borders
+    GdkRGBA color;
+    get_theme_color_with_alpha(GTK_WIDGET(text_view), "window_fg_color", 0.4, &color);
+    cairo_set_source_rgba(cr, color.red, color.green, color.blue, color.alpha);
+
+    // Iterate tags in table; find those with name starting with "blockquote"
+    // For each tag, scan ranges and draw a vertical stripe spanning the range lines
+    // Collect blockquote tags from the table
+    typedef struct { GPtrArray *arr; } TagCollect;
+    TagCollect tc = { g_ptr_array_new_with_free_func(g_object_unref) };
+    gtk_text_tag_table_foreach(table, collect_bq, &tc);
+
+    for (guint i = 0; i < tc.arr->len; i++) {
+        GtkTextTag *tag = GTK_TEXT_TAG(g_ptr_array_index(tc.arr, i));
+        // Find ranges for this tag within the buffer; we’ll clip to visible later
+        GtkTextIter it;
+        gtk_text_buffer_get_start_iter(buffer, &it);
+        gboolean inside = gtk_text_iter_has_tag(&it, tag);
+        GtkTextIter range_start;
+        while (gtk_text_iter_forward_to_tag_toggle(&it, tag)) {
+            if (!inside) { range_start = it; inside = TRUE; }
+            else {
+                GtkTextIter range_end = it; inside = FALSE;
+                // Skip if entirely above or below visible region
+                if (gtk_text_iter_compare(&range_end, &vis_start) <= 0 ||
+                    gtk_text_iter_compare(&range_start, &vis_end) >= 0) {
+                    continue;
+                }
+                // Compute x position from the start of range
+                GdkRectangle loc_start, loc_end;
+                gtk_text_view_get_iter_location(text_view, &range_start, &loc_start);
+                gtk_text_view_get_iter_location(text_view, &range_end, &loc_end);
+                // Stripe position in overlay coords: buffer coords minus visible rect origin
+                int x = loc_start.x - vis.x; // after left margin
+                int stripe_x = x - 8; // inset a bit into the left margin
+                if (stripe_x < 0) stripe_x = 0;
+
+                // Vertical span: from first line y to last line bottom
+                int y1 = loc_start.y - vis.y;
+                int y2_line_y, y2_line_h;
+                gtk_text_view_get_line_yrange(text_view, &range_end, &y2_line_y, &y2_line_h);
+                int y2 = (y2_line_y + y2_line_h) - vis.y;
+                if (y2 < y1) { int t=y1; y1=y2; y2=t; }
+
+                // Draw 3px wide vertical stripe
+                cairo_rectangle(cr, stripe_x, y1, 3, y2 - y1);
+                cairo_fill(cr);
+            }
+        }
+    }
+    g_ptr_array_free(tc.arr, TRUE);
+}
+
+static void collect_bq(GtkTextTag *tag, gpointer user_data) {
+    TagCollect *C = (TagCollect*)user_data;
+    const char *nm = g_object_get_data(G_OBJECT(tag), "tag-name");
+    if (nm && g_str_has_prefix(nm, "blockquote")) {
+        g_ptr_array_add(C->arr, g_object_ref(tag));
+    }
+}
+
+// Helper function to get theme color with custom alpha
+// Uses modern GTK4 approach via AdwStyleManager instead of deprecated style context
+gboolean get_theme_color_with_alpha(GtkWidget *widget, const char *color_name, gdouble alpha, GdkRGBA *result) {
+    (void)widget; // Unused parameter - keeping for API compatibility
+    
+    // Use AdwStyleManager for theme detection
+    AdwStyleManager *sm = adw_style_manager_get_default();
+    gboolean prefer_dark = FALSE;
+    if (sm) {
+        AdwColorScheme cs = adw_style_manager_get_color_scheme(sm);
+        prefer_dark = (cs == ADW_COLOR_SCHEME_FORCE_DARK || cs == ADW_COLOR_SCHEME_PREFER_DARK);
+    }
+    
+    // Define theme-aware colors based on common GTK theme color names
+    if (g_strcmp0(color_name, "theme_fg_color") == 0 || g_strcmp0(color_name, "foreground") == 0) {
+        if (prefer_dark) {
+            gdk_rgba_parse(result, "#ffffff");
+        } else {
+            gdk_rgba_parse(result, "#000000");
+        }
+        result->alpha = alpha;
+        return TRUE;
+    } else if (g_strcmp0(color_name, "theme_bg_color") == 0 || g_strcmp0(color_name, "background") == 0) {
+        if (prefer_dark) {
+            gdk_rgba_parse(result, "#242424");
+        } else {
+            gdk_rgba_parse(result, "#ffffff");
+        }
+        result->alpha = alpha;
+        return TRUE;
+    } else if (g_strcmp0(color_name, "theme_selected_bg_color") == 0 || g_strcmp0(color_name, "accent") == 0) {
+        if (prefer_dark) {
+            gdk_rgba_parse(result, "#78aeed");
+        } else {
+            gdk_rgba_parse(result, "#3584e4");
+        }
+        result->alpha = alpha;
+        return TRUE;
+    }
+    
+    // Use blue fallback colors instead of grey ones
+    if (prefer_dark) {
+        // Dark mode: use blue_4 (#1c71d8) equivalent
+        result->red = 28.0/255.0; result->green = 113.0/255.0; result->blue = 216.0/255.0; result->alpha = alpha;
+    } else {
+        // Light mode: use blue_1 (#99c1f1) equivalent  
+        result->red = 153.0/255.0; result->green = 193.0/255.0; result->blue = 241.0/255.0; result->alpha = alpha;
+    }
+    return FALSE; // Indicate fallback was used
+}
+
+// Zoom functionality implementation
+static void zoom_text_view(GtkTextView *text_view, gboolean zoom_in) {
+    if (!text_view) return;
+    
+    // Get current zoom level from widget data, default to 1.0
+    gdouble *stored_zoom = g_object_get_data(G_OBJECT(text_view), "zoom-level");
+    gdouble current_zoom = stored_zoom ? *stored_zoom : 1.0;
+    
+    const gdouble zoom_step = 0.1;
+    const gdouble min_zoom = 0.5;
+    const gdouble max_zoom = 3.0;
+    
+    if (zoom_in && current_zoom < max_zoom) {
+        current_zoom += zoom_step;
+    } else if (!zoom_in && current_zoom > min_zoom) {
+        current_zoom -= zoom_step;
+    } else {
+        return; // No change needed
+    }
+    
+    // Apply zoom via CSS using modern API with proper formatting
+    // Use integer scaling in percentage to avoid locale decimal issues
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gint zoom_percent = (gint)(current_zoom * 100.0);
+    gchar *css = g_strdup_printf("textview { font-size: %d%%; }", zoom_percent);
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(),
+                                                GTK_STYLE_PROVIDER(provider),
+                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    g_free(css);
+    
+    // Store updated zoom level
+    gdouble *zoom_ptr = g_malloc(sizeof(gdouble));
+    *zoom_ptr = current_zoom;
+    g_object_set_data_full(G_OBJECT(text_view), "zoom-level", zoom_ptr, g_free);
+}
+
+
+static gboolean on_scroll_event(GtkEventControllerScroll *controller, gdouble dx, gdouble dy, gpointer user_data) {
+    (void)controller; (void)dx;
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    
+    GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller));
+    
+    if (state & GDK_CONTROL_MASK) {
+        if (dy < 0) {
+            zoom_text_view(text_view, TRUE);  // Scroll up = zoom in
+        } else if (dy > 0) {
+            zoom_text_view(text_view, FALSE); // Scroll down = zoom out
+        }
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
+// Codeblock border overlay functionality
+// (Removed) Codeblock border overlay implementation
 
 // Embed GtkPicture widgets at positions of image tags and hide the alt text visually
 typedef struct {
@@ -455,8 +804,34 @@ static void on_text_view_link_clicked(G_GNUC_UNUSED GtkGestureClick *gesture, G_
 static gboolean save_timeout_cb(gpointer user_data) {
     GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
     save_timeout_id = 0; // reset first to avoid races
-    save_buffer_as_markdown(buffer);
+    autosave_buffer(buffer);
     return G_SOURCE_REMOVE;
+}
+
+// Smart autosave that saves to current file location if known, or default location
+static void autosave_buffer(GtkTextBuffer *buffer) {
+    // Get the application from the buffer's associated view
+    GtkTextView *text_view = GTK_TEXT_VIEW(g_object_get_data(G_OBJECT(buffer), "gtktext-view"));
+    if (text_view) {
+        GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(text_view));
+        GtkApplication *app = NULL;
+        if (GTK_IS_WINDOW(root)) {
+            app = gtk_window_get_application(GTK_WINDOW(root));
+        }
+        
+        if (app) {
+            // Check if we have a current file path
+            const char *current_path = (const char*)g_object_get_data(G_OBJECT(app), "current_file_path");
+            if (current_path && *current_path) {
+                // Save to the current file location
+                save_buffer_to_file(buffer, current_path);
+                return;
+            }
+        }
+    }
+    
+    // Fallback: save to default location if no current path is known
+    save_buffer_as_markdown(buffer);
 }
 
 static void on_setting_changed(GSettings *settings, gchar *key, G_GNUC_UNUSED gpointer user_data) {
@@ -468,7 +843,7 @@ static void on_setting_changed(GSettings *settings, gchar *key, G_GNUC_UNUSED gp
 }
 
 // Schedules a short idle/timeout to re-parse the entire buffer as CommonMark
-static void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const GtkTextIter *at_iter) {
+void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len, const GtkTextIter *at_iter) {
     if (!buffer) return;
     // Avoid scheduling if a reparse is already queued
     guint existing = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID));
@@ -496,10 +871,9 @@ static gboolean reparse_markdown_cb(gpointer user_data) {
     // Suppress recursive scheduling while we modify the buffer
     g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(1));
 
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    g_autofree char *plain = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-    if (plain && *plain) {
+    // Export current buffer (with tags) back to Markdown, so we preserve semantics
+    g_autofree char *md_src = cm_render_buffer_to_markdown(buffer);
+    if (md_src && *md_src) {
         // Preserve a plausible cursor position
         gint target = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_REPARSE_TARGET_OFFSET));
 
@@ -507,9 +881,9 @@ static gboolean reparse_markdown_cb(gpointer user_data) {
         GtkTextView *tv = GTK_TEXT_VIEW(g_object_get_data(G_OBJECT(buffer), "gtktext-view"));
 #ifdef HAVE_LIBSOUP
         SoupSession *soup_session = g_object_get_data(G_OBJECT(buffer), "soup-session");
-        if (!cm_render_markdown_to_buffer(buffer, plain, tv, soup_session)) {
+        if (!cm_render_markdown_to_buffer(buffer, md_src, tv, soup_session)) {
 #else
-        if (!cm_render_markdown_to_buffer(buffer, plain, tv, NULL)) {
+        if (!cm_render_markdown_to_buffer(buffer, md_src, tv, NULL)) {
 #endif
             g_warning("Realtime Markdown import failed");
         } else {
@@ -540,26 +914,113 @@ static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, 
     // Ignore programmatic changes from our own re-rendering
     if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE)) != 0) return;
 
-    // Heuristics: if insertion length > 1 or includes a newline or likely Markdown markers, treat as paste
-    gboolean looks_like_paste = FALSE;
-    if (len > 1) looks_like_paste = TRUE;
-    for (int i = 0; !looks_like_paste && i < len; i++) {
-        char c = text[i];
-        if (c == '\n' || c == '#' || c == '[' || c == '!' || c == '`' || c == '*' || c == '_' || c == '>' || c == '-') {
-            looks_like_paste = TRUE;
+    // Avoid reparsing the entire buffer on single keystrokes (especially Enter),
+    // which causes the view to jump/scroll and disrupts typing.
+    if (len == 1) return;
+
+    // Heuristics: Only treat larger insertions (pastes) as requiring reparse
+    gboolean looks_like_paste = (len > 8); // threshold to avoid reparse on small edits
+    if (!looks_like_paste) {
+        // Consider multi-character insertion containing newlines as paste
+        for (int i = 0; i < len; i++) {
+            if (text[i] == '\n') { looks_like_paste = TRUE; break; }
         }
     }
-    if (looks_like_paste) {
-        schedule_reparse_markdown(buffer, len, location);
-    }
+    if (looks_like_paste) schedule_reparse_markdown(buffer, len, location);
+}
+
+// Helper function to set up file filters for open dialogs
+static void setup_file_dialog_filters(GtkFileDialog *dialog) {
+    // Create a list store to hold the file filters
+    GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    
+    // Create markdown files filter
+    GtkFileFilter *md_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(md_filter, _("Markdown Files"));
+    gtk_file_filter_add_pattern(md_filter, "*.md");
+    gtk_file_filter_add_pattern(md_filter, "*.MD");
+    gtk_file_filter_add_pattern(md_filter, "*.markdown");
+    gtk_file_filter_add_pattern(md_filter, "*.MARKDOWN");
+    gtk_file_filter_add_pattern(md_filter, "*.mdown");
+    gtk_file_filter_add_pattern(md_filter, "*.mkd");
+    gtk_file_filter_add_pattern(md_filter, "*.mkdn");
+    g_list_store_append(filters, md_filter);
+    
+    // Create all files filter
+    GtkFileFilter *all_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(all_filter, _("All Files"));
+    gtk_file_filter_add_pattern(all_filter, "*");
+    g_list_store_append(filters, all_filter);
+    
+    // Set filters on the dialog
+    gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+    
+    // Set markdown filter as default
+    gtk_file_dialog_set_default_filter(dialog, md_filter);
+    
+    // Clean up references
+    g_object_unref(md_filter);
+    g_object_unref(all_filter);
+    g_object_unref(filters);
+}
+
+// Helper function to set up file filters for save dialogs
+static void setup_save_dialog_filters(GtkFileDialog *dialog) {
+    // Create a list store to hold the file filters
+    GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    
+    // Create markdown files filter
+    GtkFileFilter *md_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(md_filter, _("Markdown Files"));
+    gtk_file_filter_add_pattern(md_filter, "*.md");
+    gtk_file_filter_add_pattern(md_filter, "*.MD");
+    gtk_file_filter_add_pattern(md_filter, "*.markdown");
+    gtk_file_filter_add_pattern(md_filter, "*.MARKDOWN");
+    g_list_store_append(filters, md_filter);
+    
+    // Create all files filter
+    GtkFileFilter *all_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(all_filter, _("All Files"));
+    gtk_file_filter_add_pattern(all_filter, "*");
+    g_list_store_append(filters, all_filter);
+    
+    // Set filters on the dialog
+    gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+    
+    // Set markdown filter as default
+    gtk_file_dialog_set_default_filter(dialog, md_filter);
+    
+    // Clean up references
+    g_object_unref(md_filter);
+    g_object_unref(all_filter);
+    g_object_unref(filters);
 }
 
 // Async open-file completion callback (GAsyncReadyCallback signature)
 static void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res, gpointer user_data) {
     GtkFileDialog *d = GTK_FILE_DIALOG(source_object);
-    g_autoptr(GFile) file = gtk_file_dialog_open_finish(d, res, NULL);
-    if (!file) return;
+    GError *finish_error = NULL;
+    g_autoptr(GFile) file = gtk_file_dialog_open_finish(d, res, &finish_error);
+    if (finish_error) {
+        g_warning("File dialog finished with error: %s", finish_error->message);
+        g_clear_error(&finish_error);
+        return;
+    }
+    if (!file) {
+        g_debug("File dialog dismissed without selection");
+        return;
+    }
     g_autofree char *path = g_file_get_path(file);
+    g_debug("File selected: %s", path ? path : "(null)");
+
+    // Persist the directory for future opens
+    if (path) {
+        g_autofree char *dir = g_path_get_dirname(path);
+        if (dir && app_settings) {
+            g_settings_set_string(app_settings, "last-open-dir", dir);
+            g_debug("[file-dialog] saved last-open-dir=%s", dir);
+        }
+    }
     g_autofree char *contents = NULL; gsize len = 0; GError *err = NULL;
     if (!g_file_get_contents(path, &contents, &len, &err)) {
         g_warning("Open failed: %s", err->message);
@@ -568,20 +1029,112 @@ static void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res
     }
     GtkApplication *app = GTK_APPLICATION(user_data);
     GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
-    if (!text_view) return;
+    GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "main_stack"));
+    if (!text_view || !main_stack) return;
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    
+    // Store the current file path for future saves
+    g_object_set_data_full(G_OBJECT(app), "current_file_path", g_strdup(path), g_free);
+    
+    // Preserve original text and reset dirty flag
+    g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(contents), g_free);
+    g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
 #ifdef HAVE_LIBSOUP
     SoupSession *soup_session = g_object_get_data(G_OBJECT(app), "soup_session");
+    // Suppress dirty marking while we render programmatically
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(1));
     if (!cm_render_markdown_to_buffer(buffer, contents, GTK_TEXT_VIEW(text_view), soup_session)) {
 #else
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(1));
     if (!cm_render_markdown_to_buffer(buffer, contents, GTK_TEXT_VIEW(text_view), NULL)) {
 #endif
         g_warning("Import failed");
     } else {
         cm_render_update_theme_dependent_tags(buffer);
+        // Switch to editor view after successful file load
+        gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "editor");
         // No longer need embed_images_in_text_view since images are embedded during rendering
         // embed_images_in_text_view(GTK_TEXT_VIEW(text_view));
     }
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(0));
+}
+
+// Welcome screen open button callback
+static void welcome_open_cb(GtkButton *button, gpointer user_data) {
+    (void)button;
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    if (!app || !GTK_IS_APPLICATION(app)) {
+        g_warning("Invalid application in welcome_open_cb");
+        return;
+    }
+    GtkWindow *parent = gtk_application_get_active_window(app);
+    if (!parent) {
+        g_warning("No active window found");
+        return;
+    }
+    debug_dump_window_env(parent, "welcome-open:before");
+    GtkFileDialog *dlg = gtk_file_dialog_new();
+
+    // Prefer the last used folder, falling back to HOME
+    const char *initial_path = NULL;
+    if (app_settings) {
+        const char *cfg = g_settings_get_string(app_settings, "last-open-dir");
+        if (cfg && *cfg && g_file_test(cfg, G_FILE_TEST_IS_DIR)) initial_path = cfg;
+    }
+    if (!initial_path) initial_path = g_get_home_dir();
+    if (initial_path && *initial_path) {
+        GFile *init_dir = g_file_new_for_path(initial_path);
+        gtk_file_dialog_set_initial_folder(dlg, init_dir);
+        g_autofree char *uri = g_file_get_uri(init_dir);
+        g_debug("[file-dialog] initial-folder=%s", uri);
+        g_object_unref(init_dir);
+    }
+
+    // Set title and file filters for markdown files
+    gtk_file_dialog_set_title(dlg, _("Open Markdown File"));
+    setup_file_dialog_filters(dlg);
+
+    g_debug("[file-dialog] presenting open dialog (welcome)");
+    gtk_file_dialog_open(dlg, parent, NULL, on_open_file_dialog_finish, app);
+    g_object_unref(dlg);
+    debug_dump_window_env(parent, "welcome-open:after");
+}
+
+// Welcome screen new file button callback
+static void welcome_new_cb(GtkButton *button, gpointer user_data) {
+    (void)button;
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    if (!app || !GTK_IS_APPLICATION(app)) {
+        g_warning("Invalid application in welcome_new_cb");
+        return;
+    }
+    
+    GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
+    GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "main_stack"));
+    if (!text_view || !main_stack) {
+        g_warning("Required widgets not found in welcome_new_cb");
+        return;
+    }
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    
+    // Clear the buffer and create a new document
+    gtk_text_buffer_set_text(buffer, "", -1);
+    
+    // Clear the current file path since this is a new document
+    g_object_set_data(G_OBJECT(app), "current_file_path", NULL);
+    
+    // Reset dirty flag and original text for a clean new document
+    g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(""), g_free);
+    g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
+    
+    // Switch to editor view
+    gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "editor");
+    
+    // Focus the text view for immediate editing
+    gtk_widget_grab_focus(text_view);
+    
+    g_message("New markdown document created");
 }
 
 // App action callbacks
@@ -590,9 +1143,32 @@ static void action_open_cb (GSimpleAction *a, GVariant *p, gpointer user_data) {
   GtkApplication *app = GTK_APPLICATION(user_data);
   GtkWindow *parent = gtk_application_get_active_window(app);
   if (!parent) return;
-  GtkFileDialog *dlg = gtk_file_dialog_new();
-  gtk_file_dialog_open(dlg, parent, NULL, on_open_file_dialog_finish, app);
+    debug_dump_window_env(parent, "action-open:before");
+    GtkFileDialog *dlg = gtk_file_dialog_new();
+
+    // Prefer the last used folder, falling back to HOME
+    const char *initial_path = NULL;
+    if (app_settings) {
+        const char *cfg = g_settings_get_string(app_settings, "last-open-dir");
+        if (cfg && *cfg && g_file_test(cfg, G_FILE_TEST_IS_DIR)) initial_path = cfg;
+    }
+    if (!initial_path) initial_path = g_get_home_dir();
+    if (initial_path && *initial_path) {
+        GFile *init_dir = g_file_new_for_path(initial_path);
+        gtk_file_dialog_set_initial_folder(dlg, init_dir);
+        g_autofree char *uri = g_file_get_uri(init_dir);
+        g_debug("[file-dialog] initial-folder=%s", uri);
+        g_object_unref(init_dir);
+    }
+
+    // Set title for markdown files
+    gtk_file_dialog_set_title(dlg, _("Open Markdown File"));
+    setup_file_dialog_filters(dlg);
+
+    g_debug("[file-dialog] presenting open dialog (action)");
+    gtk_file_dialog_open(dlg, parent, NULL, on_open_file_dialog_finish, app);
   g_object_unref(dlg);
+    debug_dump_window_env(parent, "action-open:after");
 }
 
 static void action_save_cb (GSimpleAction *a, GVariant *p, gpointer user_data) {
@@ -600,8 +1176,82 @@ static void action_save_cb (GSimpleAction *a, GVariant *p, gpointer user_data) {
   GtkApplication *app = GTK_APPLICATION(user_data);
   GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
   if (!text_view) return;
+  
   GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-  save_buffer_as_markdown(buffer);
+  
+  // Check if we have a current file path
+  const char *current_path = (const char*)g_object_get_data(G_OBJECT(app), "current_file_path");
+  if (current_path && *current_path) {
+    // Save to the current file
+    save_buffer_to_file(buffer, current_path);
+  } else {
+    // No current file, trigger Save As dialog
+    action_save_as_cb(a, p, user_data);
+  }
+}
+
+// Async save-file completion callback (GAsyncReadyCallback signature)
+static void on_save_file_dialog_finish(GObject *source_object, GAsyncResult *res, gpointer user_data) {
+    GtkFileDialog *d = GTK_FILE_DIALOG(source_object);
+    GError *finish_error = NULL;
+    g_autoptr(GFile) file = gtk_file_dialog_save_finish(d, res, &finish_error);
+    if (finish_error) {
+        g_warning("Save dialog finished with error: %s", finish_error->message);
+        g_clear_error(&finish_error);
+        return;
+    }
+    if (!file) {
+        g_debug("Save dialog dismissed without selection");
+        return;
+    }
+    
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
+    if (!text_view) return;
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    g_autofree char *path = g_file_get_path(file);
+    
+    // Store the current file path for future saves
+    g_object_set_data_full(G_OBJECT(app), "current_file_path", g_strdup(path), g_free);
+    
+    // Save the buffer to the selected file
+    save_buffer_to_file(buffer, path);
+    
+    g_message("Document saved to: %s", path);
+}
+
+static void action_save_as_cb(GSimpleAction *a, GVariant *p, gpointer user_data) {
+    (void)a; (void)p;
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkWindow *parent = gtk_application_get_active_window(app);
+    if (!parent) return;
+    
+    GtkFileDialog *dlg = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dlg, _("Save Markdown File"));
+    setup_save_dialog_filters(dlg);
+    
+    // Set initial filename
+    gtk_file_dialog_set_initial_name(dlg, "document.md");
+    
+    // Prefer the last used folder, falling back to Documents
+    const char *initial_path = NULL;
+    if (app_settings) {
+        const char *cfg = g_settings_get_string(app_settings, "last-open-dir");
+        if (cfg && *cfg && g_file_test(cfg, G_FILE_TEST_IS_DIR)) initial_path = cfg;
+    }
+    if (!initial_path) {
+        initial_path = g_get_user_special_dir(G_USER_DIRECTORY_DOCUMENTS);
+        if (!initial_path) initial_path = g_get_home_dir();
+    }
+    if (initial_path && *initial_path) {
+        GFile *init_dir = g_file_new_for_path(initial_path);
+        gtk_file_dialog_set_initial_folder(dlg, init_dir);
+        g_object_unref(init_dir);
+    }
+    
+    gtk_file_dialog_save(dlg, parent, NULL, on_save_file_dialog_finish, app);
+    g_object_unref(dlg);
 }
 
 static void action_preferences_cb (GSimpleAction *a, GVariant *p, gpointer user_data) {
@@ -673,6 +1323,38 @@ static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y, gb
     return FALSE; // No tooltip for this location
 }
 
+// Saves the content of the GtkTextBuffer to a specific file path as markdown.
+static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath) {
+    // Ensure buffer is valid before proceeding
+    if (!buffer || !GTK_IS_TEXT_BUFFER(buffer)) {
+        g_warning("save_buffer_to_file: Invalid text buffer provided.");
+        return;
+    }
+    if (!filepath || !*filepath) {
+        g_warning("save_buffer_to_file: Invalid file path provided.");
+        return;
+    }
+    
+    // Always convert current buffer content to markdown
+    char *md = cm_render_buffer_to_markdown(buffer);
+    if (!md) {
+        g_warning("Cannot save: Failed to convert buffer to markdown");
+        return;
+    }
+    
+    // Save to file
+    GError *error = NULL;
+    if (!g_file_set_contents(filepath, md, -1, &error)) {
+        g_warning("Error saving file to %s: %s", filepath, error->message);
+        g_clear_error(&error);
+    } else {
+        g_message("Buffer saved as markdown to: %s", filepath);
+        // Reset dirty flag since we've saved
+        g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
+    }
+    g_free(md);
+}
+
 // Determines the full path for the save file.
 static gchar* get_save_file_path(void) {
     const gchar *doc_dir = g_get_user_special_dir(G_USER_DIRECTORY_DOCUMENTS);
@@ -680,46 +1362,6 @@ static gchar* get_save_file_path(void) {
         doc_dir = g_get_home_dir(); // Fallback to home directory if Documents isn't found
     }
     return g_build_filename(doc_dir, "mini_text_editor.md", NULL);
-}
-
-// Loads text content from the predefined save file.
-static void load_markdown_to_buffer(GtkTextView *text_view) {
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    g_autofree gchar *filename = get_save_file_path();
-    gchar *content = NULL;
-    GError *error = NULL;
-    g_message("Loading markdown from file: %s", filename);
-    if (!g_file_get_contents(filename, &content, NULL, &error)) {
-        g_warning("Error loading file: %s", error->message);
-        g_clear_error(&error);
-        // Optional: Insert some default content or leave buffer empty
-        // gtk_text_buffer_set_text(buffer, "---"Velkommen til Markvoean!\n---"Start med at skrive din Markdown her.", -1);
-        return;
-    }
-    g_debug("Loaded file contents: %s", content);
-    
-    // Get the application and soup session for image fetching
-    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(text_view));
-    GtkApplication *app = NULL;
-    if (GTK_IS_WINDOW(root)) {
-        app = gtk_window_get_application(GTK_WINDOW(root));
-    }
-    
-#ifdef HAVE_LIBSOUP
-    SoupSession *soup_session = app ? g_object_get_data(G_OBJECT(app), "soup_session") : NULL;
-    if (!cm_render_markdown_to_buffer(buffer, content, text_view, soup_session)) {
-#else
-    if (!cm_render_markdown_to_buffer(buffer, content, text_view, NULL)) {
-#endif
-        g_warning("Failed to import markdown to buffer");
-    } else {
-        g_message("Markdown imported successfully.");
-        // After loading, ensure theme-dependent tags are updated
-        cm_render_update_theme_dependent_tags(buffer);
-        // No longer need embed_images_in_text_view since images are embedded during rendering
-        // embed_images_in_text_view(text_view);
-    }
-    g_free(content);
 }
 
 // Saves the content of the GtkTextBuffer to the predefined save file as markdown.
@@ -735,7 +1377,7 @@ static void save_buffer_as_markdown(GtkTextBuffer *buffer) {
         return;
     }
     
-    // Get markdown content safely
+    // Always convert current buffer content to markdown
     char *md = cm_render_buffer_to_markdown(buffer);
     if (!md) {
         g_warning("Cannot save: Failed to convert buffer to markdown");
@@ -756,6 +1398,10 @@ static void save_buffer_as_markdown(GtkTextBuffer *buffer) {
 
 // Callback triggered when the text in the GtkTextBuffer changes.
 static void on_text_changed(GtkTextBuffer *buffer, G_GNUC_UNUSED gpointer user_data) {
+    // Mark buffer as dirty only for user-initiated edits (not while re-rendering)
+    if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE)) == 0) {
+        g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(1));
+    }
     // Debounced autosave: reset pending timer and schedule a save
     if (save_timeout_id != 0) {
         g_source_remove(save_timeout_id);
@@ -764,7 +1410,7 @@ static void on_text_changed(GtkTextBuffer *buffer, G_GNUC_UNUSED gpointer user_d
     guint delay = autosave_delay_ms;
     if (delay == 0) {
         // Immediate save when delay is disabled
-        save_buffer_as_markdown(buffer);
+        autosave_buffer(buffer);
         return;
     }
     // Take a ref to buffer for the timeout and unref when done
@@ -895,6 +1541,26 @@ static void copy_selected_text_as_markdown(GtkTextView *text_view) {
                 continue;
             }
 
+            // Replace visual unordered bullets (●/○/■ tagged with ul_bullet) with '-' for Markdown copy
+            if (!currently_in_codeblock) {
+                GtkTextTag *ul_tag = gtk_text_tag_table_lookup(tag_table, "ul_bullet");
+                GtkTextIter tmp = iter;
+                // Preserve and output leading spaces (indentation)
+                while (gtk_text_iter_compare(&tmp, &end_sel) < 0 && gtk_text_iter_get_char(&tmp) == ' ') {
+                    g_string_append_c(md, ' ');
+                    gtk_text_iter_forward_char(&tmp);
+                }
+                if (ul_tag && gtk_text_iter_compare(&tmp, &end_sel) < 0 && gtk_text_iter_has_tag(&tmp, ul_tag)) {
+                    // Emit standard Markdown bullet and skip visual bullet + following space
+                    g_string_append(md, "- ");
+                    gtk_text_iter_forward_char(&tmp); // bullet char
+                    if (gtk_text_iter_compare(&tmp, &end_sel) < 0) gtk_text_iter_forward_char(&tmp); // trailing space
+                    iter = tmp;
+                    at_line_start = FALSE;
+                    continue;
+                }
+            }
+
             if (!currently_in_codeblock) {
                 gboolean heading_started_here = FALSE;
                 if (iter_is_h1) { g_string_append(md, "# "); heading_started_here = TRUE; }
@@ -1018,7 +1684,7 @@ static void copy_selected_text_as_markdown(GtkTextView *text_view) {
     g_string_free(md, TRUE);
 }
 
-// Callback for tastaturgenvej (Ctrl+C)
+// Callback for keyboard shortcuts (Ctrl+C and zoom)
 static gboolean on_key_pressed(G_GNUC_UNUSED GtkEventControllerKey *controller,
                                guint keyval,
                                G_GNUC_UNUSED guint keycode,
@@ -1026,21 +1692,55 @@ static gboolean on_key_pressed(G_GNUC_UNUSED GtkEventControllerKey *controller,
                                gpointer user_data) {
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
 
-    // Detect Ctrl+C
-    if (keyval == GDK_KEY_c && (state & GDK_CONTROL_MASK)) {
-        g_debug("Ctrl+C detected");
-        copy_selected_text_as_markdown(text_view);
-        return TRUE; // Event handled
+    if (state & GDK_CONTROL_MASK) {
+        // Detect Ctrl+C
+        if (keyval == GDK_KEY_c) {
+            g_debug("Ctrl+C detected");
+            copy_selected_text_as_markdown(text_view);
+            return TRUE; // Event handled
+        }
+        // Zoom in: Ctrl+plus/equal/KP_Add
+        else if (keyval == GDK_KEY_plus || keyval == GDK_KEY_equal || keyval == GDK_KEY_KP_Add) {
+            zoom_text_view(text_view, TRUE);
+            return TRUE;
+        }
+        // Zoom out: Ctrl+minus/KP_Subtract
+        else if (keyval == GDK_KEY_minus || keyval == GDK_KEY_KP_Subtract) {
+            zoom_text_view(text_view, FALSE);
+            return TRUE;
+        }
+        // Reset zoom: Ctrl+0/KP_0
+        else if (keyval == GDK_KEY_0 || keyval == GDK_KEY_KP_0) {
+            // Reset zoom to 100%
+            GtkCssProvider *provider = gtk_css_provider_new();
+            gtk_css_provider_load_from_string(provider, "textview { font-size: 100%; }");
+            gtk_style_context_add_provider_for_display(gdk_display_get_default(),
+                                                        GTK_STYLE_PROVIDER(provider),
+                                                        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+            g_object_unref(provider);
+            gdouble *zoom_ptr = g_malloc(sizeof(gdouble));
+            *zoom_ptr = 1.0;
+            g_object_set_data_full(G_OBJECT(text_view), "zoom-level", zoom_ptr, g_free);
+            return TRUE;
+        }
     }
 
     return FALSE; // Pass event to other handlers
 }
 
 
-static void on_map(G_GNUC_UNUSED GtkWidget *widget, gpointer user_data) {
+static void on_map(G_GNUC_UNUSED GtkWidget *widget, G_GNUC_UNUSED gpointer user_data) {
     g_message("Main window mapped, image widgets already embedded during rendering.");
     // No longer need embed_images_in_text_view since images are embedded during rendering
     // embed_images_in_text_view(GTK_TEXT_VIEW(user_data));
+}
+
+static void on_window_map(GtkWidget *window, G_GNUC_UNUSED gpointer user_data) {
+    g_message("Window mapped, setting welcome screen visibility.");
+    GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(window), "main_stack"));
+    if (main_stack) {
+        gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "welcome");
+    }
 }
 
 static void app_activate(GApplication *application) {
@@ -1095,8 +1795,34 @@ static void app_activate(GApplication *application) {
         return;
     }
     
-    // Expose text_view to application scope for actions to use
+    // Get the main stack widget
+    GtkWidget *main_stack = GTK_WIDGET(gtk_builder_get_object(builder, "main_stack"));
+    if (!main_stack) {
+        g_critical("Failed to get main_stack from UI");
+        g_object_unref(builder);
+        return;
+    }
+    
+    // Get the welcome screen buttons
+    GtkWidget *welcome_open_button = GTK_WIDGET(gtk_builder_get_object(builder, "welcome_open_button"));
+    if (!welcome_open_button) {
+        g_critical("Failed to get welcome_open_button from UI");
+        g_object_unref(builder);
+        return;
+    }
+    
+    GtkWidget *welcome_new_button = GTK_WIDGET(gtk_builder_get_object(builder, "welcome_new_button"));
+    if (!welcome_new_button) {
+        g_critical("Failed to get welcome_new_button from UI");
+        g_object_unref(builder);
+        return;
+    }
+    
+    // Expose widgets to application scope for actions to use
     g_object_set_data(G_OBJECT(app), "text_view", text_view);
+    g_object_set_data(G_OBJECT(app), "main_stack", main_stack);
+    g_object_set_data(G_OBJECT(app), "welcome_open_button", welcome_open_button);
+    g_object_set_data(G_OBJECT(app), "welcome_new_button", welcome_new_button);
 
     // Create a global soup session for image fetching
 #ifdef HAVE_LIBSOUP
@@ -1122,6 +1848,7 @@ static void app_activate(GApplication *application) {
         GTK_STYLE_PROVIDER(provider),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
+
     
     // Sørg for at builder associeres med window, så vi kan få det fra ethvert widget
     // der er forbundet med vinduet - Genetablerer den nødvendige reference
@@ -1162,7 +1889,18 @@ static void app_activate(GApplication *application) {
         g_object_set_data(G_OBJECT(buffer), "soup-session", soup_session);
     }
 #endif
-    load_markdown_to_buffer(GTK_TEXT_VIEW(text_view));
+    // Install blockquote overlay for visual left border
+    setup_blockquote_overlay(GTK_TEXT_VIEW(text_view));
+    
+    // Install codeblock overlay for visual borders
+    // Codeblock border overlay removed
+
+    // Connect welcome screen buttons
+    g_signal_connect(welcome_open_button, "clicked", G_CALLBACK(welcome_open_cb), app);
+    g_signal_connect(welcome_new_button, "clicked", G_CALLBACK(welcome_new_cb), app);
+    
+    // Store main_stack reference for setting visibility after window is shown
+    g_object_set_data(G_OBJECT(window), "main_stack", main_stack);
     // Store the handler ID so we can disconnect it later if needed
     buffer_changed_signal_id = g_signal_connect(buffer, "changed", G_CALLBACK(on_text_changed), NULL);
     // Realtime paste→markdown conversion: listen to inserted text
@@ -1178,6 +1916,11 @@ static void app_activate(GApplication *application) {
     g_signal_connect(click_gesture, "pressed", G_CALLBACK(on_text_view_link_clicked), text_view);
     gtk_widget_add_controller(GTK_WIDGET(text_view), GTK_EVENT_CONTROLLER(click_gesture));
 
+    // Add zoom support with Ctrl+mouse wheel
+    GtkEventController *scroll_controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(scroll_controller, "scroll", G_CALLBACK(on_scroll_event), text_view);
+    gtk_widget_add_controller(GTK_WIDGET(text_view), scroll_controller);
+
     // Tilføj signal for window close
     g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), text_view);
 
@@ -1187,8 +1930,10 @@ static void app_activate(GApplication *application) {
     // Wire headerbar buttons to actions
     GtkWidget *open_button = GTK_WIDGET(gtk_builder_get_object(builder, "open_button"));
     GtkWidget *save_button = GTK_WIDGET(gtk_builder_get_object(builder, "save_button"));
+    GtkWidget *save_as_button = GTK_WIDGET(gtk_builder_get_object(builder, "save_as_button"));
     if (open_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(open_button), "app.open");
     if (save_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(save_button), "app.save");
+    if (save_as_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(save_as_button), "app.save-as");
 
     // Accessibility: Provide accessible names for icon-only buttons
     if (open_button) {
@@ -1201,13 +1946,82 @@ static void app_activate(GApplication *application) {
             GTK_ACCESSIBLE_PROPERTY_LABEL, _("Save"),
             -1);
     }
+    if (save_as_button) {
+        gtk_accessible_update_property(GTK_ACCESSIBLE(save_as_button),
+            GTK_ACCESSIBLE_PROPERTY_LABEL, _("Save As"),
+            -1);
+    }
 
     g_object_set(text_view, "editable", TRUE, "cursor-visible", TRUE, NULL);
     g_signal_connect(text_view, "map", G_CALLBACK(on_map), text_view); // Re-scan after widget is mapped
 
+    // Connect window map signal to set welcome screen after proper initialization
+    g_signal_connect(window, "map", G_CALLBACK(on_window_map), NULL);
+
     gtk_window_present(GTK_WINDOW(window));
     // Vi frigiver ikke builder her, da vi gemmer en reference i window-objektet
     // Den frigives, når window ødelægges
+}
+
+static void app_open(GApplication *application, GFile **files, gint n_files, const gchar *hint) {
+    // First activate the application to ensure window is created
+    app_activate(application);
+    
+    if (n_files > 0) {
+        // Open the first file (ignore additional files for now)
+        GFile *file = files[0];
+        gchar *path = g_file_get_path(file);
+        
+        if (path) {
+            g_message("Opening file: %s", path);
+            
+            // Get the current window and text buffer
+            GtkWindow *window = gtk_application_get_active_window(GTK_APPLICATION(application));
+            if (window) {
+                GtkTextView *text_view = g_object_get_data(G_OBJECT(application), "text_view");
+                if (text_view) {
+                    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+                    
+                    // Load file content
+                    gchar *contents = NULL;
+                    gsize length = 0;
+                    GError *error = NULL;
+                    
+                    if (g_file_get_contents(path, &contents, &length, &error)) {
+                        // Set the content in the buffer
+                        gtk_text_buffer_set_text(buffer, contents, length);
+                        
+                        // Store the file path for saving
+                        g_object_set_data_full(G_OBJECT(window), "current_file_path", 
+                                             g_strdup(path), g_free);
+                        
+                        // Update window title
+                        gchar *basename = g_path_get_basename(path);
+                        gchar *title = g_strdup_printf("GTK Text - %s", basename);
+                        gtk_window_set_title(window, title);
+                        g_free(basename);
+                        g_free(title);
+                        
+                        // Trigger markdown parsing
+                        schedule_reparse_markdown(buffer, 0, NULL);
+                        
+                        // Switch to editor view (hide welcome screen)
+                        GtkWidget *main_stack = g_object_get_data(G_OBJECT(window), "main_stack");
+                        if (main_stack) {
+                            gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "editor");
+                        }
+                        
+                        g_message("Successfully loaded file: %s", path);
+                        g_free(contents);
+                    } else {
+                        g_warning("Failed to load file %s: %s", path, error->message);
+                        g_error_free(error);
+                    }
+                }
+            }
+            g_free(path);
+        }
+    }
 }
 
 int main (int argc, char *argv[]) {
@@ -1218,20 +2032,32 @@ int main (int argc, char *argv[]) {
       break;
     }
   }
+
+  // In dev runs, locate local GSettings schemas automatically
+  maybe_setup_gsettings_schemas();
   // Initialize i18n
   setlocale(LC_ALL, "");
   bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
   bind_textdomain_codeset(GETTEXT_PACKAGE, "UTF-8");
   textdomain(GETTEXT_PACKAGE);
 
+    // Hint GTK to use the desktop portal for native dialogs if available.
+    // This can avoid GVfs-backed codepaths that emit benign warnings like
+    // "Failed to measure available space" on some systems.
+    if (!g_getenv("GTK_USE_PORTAL")) {
+        g_setenv("GTK_USE_PORTAL", "1", FALSE);
+        g_debug("Set GTK_USE_PORTAL=1 for file dialogs");
+    }
+
   g_autoptr (AdwApplication) app = NULL;
   int status;
 
-  app = adw_application_new ("com.example.MiniTextEditor", G_APPLICATION_DEFAULT_FLAGS);
+  app = adw_application_new ("com.example.MiniTextEditor", G_APPLICATION_HANDLES_OPEN);
 
   const GActionEntry app_actions[] = {
     { "open", action_open_cb, NULL, NULL, NULL, {0} },
     { "save", action_save_cb, NULL, NULL, NULL, {0} },
+    { "save-as", action_save_as_cb, NULL, NULL, NULL, {0} },
     { "preferences", action_preferences_cb, NULL, NULL, NULL, {0} },
     { "about", action_about_cb, NULL, NULL, NULL, {0} },
   };
@@ -1241,10 +2067,12 @@ int main (int argc, char *argv[]) {
   // Debug: To inspect actions at runtime, run with GTK_DEBUG=actions
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.open", (const char*[]){ "<primary>o", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save", (const char*[]){ "<primary>s", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save-as", (const char*[]){ "<primary><shift>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.preferences", (const char*[]){ "<primary>comma", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.about", (const char*[]){ NULL });
 
   g_signal_connect (app, "activate", G_CALLBACK (app_activate), NULL);
+  g_signal_connect (app, "open", G_CALLBACK (app_open), NULL);
   status = g_application_run (G_APPLICATION (app), argc, argv);
 
   return status;

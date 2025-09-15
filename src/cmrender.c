@@ -7,8 +7,71 @@
 #include <stdio.h>
 #include <cmark.h> // Ensure cmark functions are declared
 
+// Fast qdata keys for tag name and tag cache
+static GQuark quark_tag_name = 0;
+static GQuark quark_tag_cache = 0;
+
+// Structure for per-buffer tag caching
+typedef struct {
+    GHashTable *map; // key: char* (tag name), value: GtkTextTag*
+} TagCache;
+
+static void tag_cache_free(gpointer p) {
+    TagCache *c = (TagCache *)p;
+    if (!c) return;
+    if (c->map) g_hash_table_destroy(c->map);
+    g_free(c);
+}
+
 // Forward declare the image fetch callback type to match main.c pattern
 typedef void (*ImageFetchCallback)(GdkPixbuf *pixbuf, GError *error, gpointer user_data);
+
+// Local theme color helper (mirrors main.c). Using a static version here avoids
+// linking issues in headless/unit-test builds that don't include main.o.
+static gboolean get_theme_color_with_alpha(GtkWidget *widget, const char *color_name, gdouble alpha, GdkRGBA *result) {
+    (void)widget; // Unused parameter - keeping for API compatibility
+    
+    // Use AdwStyleManager for theme detection
+    AdwStyleManager *sm = adw_style_manager_get_default();
+    gboolean prefer_dark = FALSE;
+    if (sm) {
+        AdwColorScheme cs = adw_style_manager_get_color_scheme(sm);
+        prefer_dark = (cs == ADW_COLOR_SCHEME_FORCE_DARK || cs == ADW_COLOR_SCHEME_PREFER_DARK);
+    }
+    
+    // Define theme-aware colors based on common GTK theme color names
+    if (g_strcmp0(color_name, "theme_fg_color") == 0 || g_strcmp0(color_name, "foreground") == 0) {
+        if (prefer_dark) {
+            gdk_rgba_parse(result, "#ffffff");
+        } else {
+            gdk_rgba_parse(result, "#000000");
+        }
+        result->alpha = alpha;
+        return TRUE;
+    } else if (g_strcmp0(color_name, "theme_bg_color") == 0 || g_strcmp0(color_name, "background") == 0) {
+        if (prefer_dark) {
+            gdk_rgba_parse(result, "#242424");
+        } else {
+            gdk_rgba_parse(result, "#ffffff");
+        }
+        result->alpha = alpha;
+        return TRUE;
+    } else if (g_strcmp0(color_name, "theme_selected_bg_color") == 0 || g_strcmp0(color_name, "accent") == 0) {
+        if (prefer_dark) {
+            gdk_rgba_parse(result, "#78aeed");
+        } else {
+            gdk_rgba_parse(result, "#3584e4");
+        }
+        result->alpha = alpha;
+        return TRUE;
+    }
+    if (prefer_dark) {
+        result->red = 28.0/255.0; result->green = 113.0/255.0; result->blue = 216.0/255.0; result->alpha = alpha;
+    } else {
+        result->red = 153.0/255.0; result->green = 193.0/255.0; result->blue = 241.0/255.0; result->alpha = alpha;
+    }
+    return FALSE;
+}
 
 // Structure to hold parameters needed for immediate image fetching during rendering
 typedef struct {
@@ -18,6 +81,9 @@ typedef struct {
 
 // Global context for image fetching during rendering
 static ImageFetchContext *g_image_fetch_context = NULL;
+// Whether to use visual bullets (●/○/■) for unordered lists.
+// Enabled when rendering in the app (text_view != NULL); disabled in headless tests.
+static gboolean g_use_visual_bullets = TRUE;
 
 // Helper structure for image widget async operations
 typedef struct {
@@ -34,23 +100,22 @@ typedef struct {
 static const char *get_tag_name_safe(GtkTextTag *tag) {
     if (!tag) return NULL;
 
-    const char *name = g_object_get_data(G_OBJECT(tag), "tag-name");
-    if (name && *name) {
-        return name;
-    }
+    if (G_UNLIKELY(quark_tag_name == 0))
+        quark_tag_name = g_quark_from_static_string("tag-name");
+
+    const char *name = g_object_get_qdata(G_OBJECT(tag), quark_tag_name);
+    if (name && *name) return name;
 
     gchar *prop_name = NULL;
     g_object_get(G_OBJECT(tag), "name", &prop_name, NULL);
-
     if (prop_name && *prop_name) {
-        g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(prop_name), (GDestroyNotify)g_free);
-        const char *stored_name = g_object_get_data(G_OBJECT(tag), "tag-name");
+        g_object_set_qdata_full(G_OBJECT(tag), quark_tag_name, g_strdup(prop_name), g_free);
+        const char *stored_name = g_object_get_qdata(G_OBJECT(tag), quark_tag_name);
         g_free(prop_name);
         return stored_name;
     }
-
     g_free(prop_name);
-    g_warning("Tag name not found for tag %p (data 'tag-name' or GObject property 'name').", (void*)tag);
+    g_warning("Tag name not found for tag %p.", (void*)tag);
     return NULL;
 }
 
@@ -133,7 +198,27 @@ static void on_picture_notify_paintable(GObject *object, GParamSpec *pspec, gpoi
     }
 }
 
-static GtkWidget *create_image_widget(const char *alt_text, const char *url) {
+// Click handler for image widgets: opens the preferred URL in default handler
+static void on_image_picture_pressed(G_GNUC_UNUSED GtkGestureClick *gesture,
+                                     G_GNUC_UNUSED gint n_press,
+                                     G_GNUC_UNUSED gdouble x,
+                                     G_GNUC_UNUSED gdouble y,
+                                     gpointer user_data) {
+    GtkWidget *widget = GTK_WIDGET(user_data);
+    const char *open = (const char*) g_object_get_data(G_OBJECT(widget), "open-url");
+    if (!open || !*open) open = (const char*) g_object_get_data(G_OBJECT(widget), "image-url");
+    if (!open || !*open) return;
+
+    GtkWidget *view = g_image_fetch_context ? GTK_WIDGET(g_image_fetch_context->text_view)
+                                            : gtk_widget_get_ancestor(widget, GTK_TYPE_TEXT_VIEW);
+    GtkWindow *win = view ? GTK_WINDOW(gtk_widget_get_ancestor(view, GTK_TYPE_WINDOW)) : NULL;
+    GtkUriLauncher *launcher = gtk_uri_launcher_new(open);
+    gtk_uri_launcher_launch(launcher, win, NULL, NULL, NULL);
+    g_object_unref(launcher);
+}
+
+static GtkWidget *create_image_widget(const char *alt_text, const char *url,
+                                      const char *open_url, const char *title) {
     g_debug("[image-widget] Creating image widget for URL: %s", url ? url : "(null)");
     
     // Create a box container for the image and optional caption
@@ -155,10 +240,39 @@ static GtkWidget *create_image_widget(const char *alt_text, const char *url) {
     gtk_widget_set_size_request(picture, 50, 50);
     gtk_widget_set_halign(picture, GTK_ALIGN_START);
     gtk_widget_set_valign(picture, GTK_ALIGN_START);
-    
+
     // Connect signal to adjust size when image loads
     g_signal_connect(picture, "notify::paintable", G_CALLBACK(on_picture_notify_paintable), NULL);
-    
+
+    // Accessibility label from alt or title/url
+    const char *acc_label = (alt_text && *alt_text) ? alt_text
+                          : (title && *title) ? title
+                          : (open_url && *open_url) ? open_url
+                          : url;
+    if (acc_label) {
+        gtk_accessible_update_property(GTK_ACCESSIBLE(picture),
+                                       GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                       acc_label,
+                                       -1);
+    }
+
+    // Tooltip and click navigation; prefer enclosing link when present
+    if (title && *title) gtk_widget_set_tooltip_text(picture, title);
+    else if (open_url && *open_url) gtk_widget_set_tooltip_text(picture, open_url);
+    else if (url) gtk_widget_set_tooltip_text(picture, url);
+
+    // Make the image clickable
+    if ((open_url && *open_url) || (url && *url)) {
+        GtkGesture *click = gtk_gesture_click_new();
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
+        g_signal_connect(click, "pressed", G_CALLBACK(on_image_picture_pressed), picture);
+        gtk_widget_add_controller(picture, GTK_EVENT_CONTROLLER(click));
+        if (open_url && *open_url)
+            g_object_set_data_full(G_OBJECT(picture), "open-url", g_strdup(open_url), g_free);
+        if (url && *url)
+            g_object_set_data_full(G_OBJECT(picture), "image-url", g_strdup(url), g_free);
+    }
+
     gtk_box_append(GTK_BOX(box), picture);
     
     // Add caption if provided
@@ -215,7 +329,14 @@ G_GNUC_UNUSED static void open_inline_tags_for_segment(GString *md_output, GSLis
 // static char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer); // Declaration removed, will be non-static
 
 // Forward declaration for the recursive helper
-// Maintain a stack of ordered-list counters to support nesting.
+// Maintain a stack of list state (ordered start, delimiter, tightness) to support nesting.
+typedef struct {
+    gboolean ordered;
+    int next_number;      // for ordered lists
+    char delim_char;      // '.' or ')'
+    gboolean tight;       // from cmark
+} ListCtx;
+
 static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *buffer, GtkTextIter *iter, GSList *active_tags, GArray *ol_counter_stack);
 static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter *iter, const char *text, GSList *active_tags);
 
@@ -231,9 +352,27 @@ static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter
  * @return The GtkTextTag, or NULL if creation failed for an unknown tag type.
  */
 static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const char *tag_name) {
-    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
-    GtkTextTag *tag = gtk_text_tag_table_lookup(tag_table, tag_name);
+    if (!buffer || !tag_name || !*tag_name) return NULL;
 
+    if (G_UNLIKELY(quark_tag_cache == 0))
+        quark_tag_cache = g_quark_from_static_string("cm-tag-cache");
+
+    TagCache *cache = g_object_get_qdata(G_OBJECT(buffer), quark_tag_cache);
+    if (!cache) {
+        cache = g_new0(TagCache, 1);
+        cache->map = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+        g_object_set_qdata_full(G_OBJECT(buffer), quark_tag_cache, cache, tag_cache_free);
+    }
+
+    // 1) Try cache first
+    GtkTextTag *tag = g_hash_table_lookup(cache->map, tag_name);
+    if (tag) return tag;
+
+    // 2) Lookup in tag table
+    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
+    tag = gtk_text_tag_table_lookup(tag_table, tag_name);
+
+    // 3) Create when missing
     if (!tag) {
         if (strcmp(tag_name, "bold") == 0) {
             tag = gtk_text_buffer_create_tag(buffer, "bold", "weight", PANGO_WEIGHT_BOLD, NULL);
@@ -265,31 +404,55 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
                                              "pixels-below-lines", 1,
                                              NULL);
         } else if (strcmp(tag_name, "codeblock") == 0) {
-            // Basic properties for code blocks
+            // Basic properties for fenced code blocks — visual colors are set by theme update.
+            // Do NOT paint per-glyph background; we only want a paragraph-wide background.
             tag = gtk_text_buffer_create_tag(buffer, "codeblock",
                                              "family", "monospace",
-                                             "left-margin", 12,
-                                             "right-margin", 12,
-                                             "pixels-above-lines", 6,
-                                             "pixels-below-lines", 6,
+                                             "background-full-height", FALSE,
+                                             "left-margin", 32,       // Indented margin for fenced blocks (4 spaces equivalent)
+                                             "right-margin", 12,      // Standard margin for fenced blocks
+                                             "pixels-above-lines", 6, // Standard padding for fenced blocks
+                                             "pixels-below-lines", 6, // Standard padding for fenced blocks
                                              "wrap-mode", GTK_WRAP_NONE, // Code blocks typically don't wrap
+                                             "indent", 2,             // Minimal indent for fenced blocks
+                                             NULL);
+        } else if (strcmp(tag_name, "codeblock_indented") == 0) {
+            // Indented code blocks should visually represent the 4+ space indentation
+            // Make them feel properly indented according to CommonMark spec
+            tag = gtk_text_buffer_create_tag(buffer, "codeblock_indented",
+                                             "family", "monospace",
+                                             "background-full-height", FALSE,
+                                             "left-margin", 48,       // Larger margin to represent 4+ space indentation
+                                             "right-margin", 12,      // Standard right margin
+                                             "pixels-above-lines", 6, // Standard padding
+                                             "pixels-below-lines", 6, // Standard padding
+                                             "wrap-mode", GTK_WRAP_NONE, // Code blocks typically don't wrap
+                                             "indent", 8,             // More prominent indent for indented blocks
                                              NULL);
         } else if (strcmp(tag_name, "hr") == 0) {
-            // For hr, we might insert a visual separator or use paragraph styling.
-            // Here, just creating a tag that could be used to style a paragraph containing "---"
-            // or for custom drawing if GtkTextView is subclassed.
+            // Horizontal rule: create a full-width line effect
+            // We insert line characters for visual effect but export as "---"
             tag = gtk_text_buffer_create_tag(buffer, "hr",
-                                             "pixels-above-lines", 8,
-                                             "pixels-below-lines", 8,
-                                             // "underline", PANGO_UNDERLINE_SINGLE, // Example: could underline text
-                                             // "strikethrough", TRUE, // Example
+                                             "pixels-above-lines", 12,
+                                             "pixels-below-lines", 12,
+                                             "justification", GTK_JUSTIFY_LEFT,
+                                             "foreground-rgba", NULL, // Will be set by theme update
                                              NULL);
         } else if (g_str_has_prefix(tag_name, "blockquote")) {
             // Support nested blockquotes by creating tags named
-            // "blockquote1", "blockquote2", ... with identical styling.
-            // Using left-margin provides clearer block-level indentation.
+            // "blockquote1", "blockquote2", ...
+            // Style with left margin only; no background colors
+            int depth = 1;
+            const char *p = tag_name + strlen("blockquote");
+            if (p && *p >= '0' && *p <= '9') depth = MAX(1, atoi(p));
+            int margin = 16 * depth; // 16px per nesting level
             tag = gtk_text_buffer_create_tag(buffer, tag_name,
-                                             "left-margin", 20,
+                                             "left-margin", margin,
+                                             "right-margin", 0,
+                                             "pixels-above-lines", 2,
+                                             "pixels-below-lines", 2,
+                                             "paragraph-background", NULL,  // Explicitly remove paragraph background
+                                             "background", NULL,            // Explicitly remove text background
                                              NULL);
         } else if (strcmp(tag_name, "link") == 0) {
             tag = gtk_text_buffer_create_tag(buffer, "link",
@@ -306,18 +469,34 @@ static GtkTextTag* cm_render_get_or_create_base_tag(GtkTextBuffer *buffer, const
         } else {
             g_warning("cm_render_get_or_create_base_tag: Unknown tag name '%s'", tag_name);
         }
-        
-        // Store the name for our own access in GTK4
-        if (tag) {
-            g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(tag_name), (GDestroyNotify)g_free);
-        }
-    } else {
-        // Even for existing tags, make sure they have the tag name data set
-        if (!g_object_get_data(G_OBJECT(tag), "tag-name")) {
-            g_object_set_data_full(G_OBJECT(tag), "tag-name", g_strdup(tag_name), (GDestroyNotify)g_free);
-        }
+    }
+
+    // Store readable name via qdata and insert into cache
+    if (tag) {
+        if (G_UNLIKELY(quark_tag_name == 0))
+            quark_tag_name = g_quark_from_static_string("tag-name");
+        if (!g_object_get_qdata(G_OBJECT(tag), quark_tag_name))
+            g_object_set_qdata_full(G_OBJECT(tag), quark_tag_name, g_strdup(tag_name), g_free);
+
+        if (!g_hash_table_lookup(cache->map, tag_name))
+            g_hash_table_insert(cache->map, g_strdup(tag_name), tag);
     }
     return tag;
+}
+
+static void update_blockquote_tag(GtkTextTag *tag, gpointer user_data) {
+    (void)user_data;  // Mark unused parameter
+    const char *name = g_object_get_data(G_OBJECT(tag), "tag-name");
+    if (!name || !g_str_has_prefix(name, "blockquote")) return;
+    // Ensure left margin is set consistently and no backgrounds
+    int depth = 1; const char *p = name + strlen("blockquote");
+    if (p && *p >= '0' && *p <= '9') depth = MAX(1, atoi(p));
+    int margin = 16 * depth;
+    g_object_set(tag, 
+                 "left-margin", margin,
+                 "paragraph-background", NULL,  // Explicitly clear paragraph background
+                 "background", NULL,            // Explicitly clear text background
+                 NULL);
 }
 
 void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
@@ -333,14 +512,99 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     GtkTextTag *code_tag = cm_render_get_or_create_base_tag(buffer, "code");
     // Ensure 'codeblock' tag exists or create it
     GtkTextTag *codeblock_tag = cm_render_get_or_create_base_tag(buffer, "codeblock");
+    // Ensure 'codeblock_indented' tag exists or create it
+    GtkTextTag *codeblock_indented_tag = cm_render_get_or_create_base_tag(buffer, "codeblock_indented");
+    // Ensure 'hr' tag exists or create it
+    GtkTextTag *hr_tag = cm_render_get_or_create_base_tag(buffer, "hr");
     // Ensure 'link' tag exists or create it (though its base style is non-theme dependent)
     cm_render_get_or_create_base_tag(buffer, "link");
 
 
-    const char* code_fg_color = is_dark ? "#e0e0e0" : NULL; 
-    const char* code_bg_color = is_dark ? "rgba(50,50,50,0.7)" : "rgba(241,241,241,0.7)"; // Slightly transparent
-    const char* codeblock_fg_color = is_dark ? "#e0e0e0" : NULL; 
-    const char* codeblock_bg_color = is_dark ? "#282c34" : "#f6f8fa"; // Common editor theme colors
+    // Get proper theme colors
+    const char* code_fg_color = NULL;  // Will be set based on theme lookup
+    const char* codeblock_fg_color = is_dark ? "#e0e0e0" : NULL;
+    
+    // Try to get the associated text view to lookup theme colors
+    GtkWidget *text_view = g_object_get_data(G_OBJECT(buffer), "gtktext-view");
+    GdkRGBA code_bg_rgba, code_fg_rgba, codeblock_bg_rgba;
+    char *code_bg_color_str = NULL;
+    char *code_fg_color_str = NULL;
+    char *codeblock_bg_color_str = NULL;
+    
+    if (text_view) {
+        // Try different GNOME red color names for inline code
+        const char* red_color_names[] = { 
+            is_dark ? "red_4" : "red_1",
+            is_dark ? "@red_4" : "@red_1", 
+            is_dark ? "destructive_bg_color" : "destructive_bg_color",
+            NULL 
+        };
+        
+        // Try different GNOME red color names for inline code foreground
+        const char* red_fg_color_names[] = { 
+            is_dark ? "red_2" : "red_5",
+            is_dark ? "@red_2" : "@red_5", 
+            is_dark ? "destructive_color" : "destructive_color",
+            NULL 
+        };
+        
+        // Try different GNOME blue color names for code blocks
+        const char* blue_color_names[] = { 
+            is_dark ? "blue_4" : "blue_1",
+            is_dark ? "@blue_4" : "@blue_1", 
+            "accent_bg_color",  // Fallback to accent color
+            NULL 
+        };
+        
+        // Get red background color for inline code
+        for (int i = 0; red_color_names[i] && !code_bg_color_str; i++) {
+            if (get_theme_color_with_alpha(text_view, red_color_names[i], is_dark ? 0.3 : 0.2, &code_bg_rgba)) {
+                // Convert RGBA to string - use integer alpha to avoid locale decimal issues
+                int alpha_int = (int)(code_bg_rgba.alpha * 1000); // Convert to integer (0.2 -> 200)
+                code_bg_color_str = g_strdup_printf("rgba(%d,%d,%d,0.%03d)", 
+                                                    (int)(code_bg_rgba.red * 255), 
+                                                    (int)(code_bg_rgba.green * 255), 
+                                                    (int)(code_bg_rgba.blue * 255), 
+                                                    alpha_int);
+                break;
+            }
+        }
+        
+        // Get red foreground color for inline code
+        for (int i = 0; red_fg_color_names[i] && !code_fg_color_str; i++) {
+            if (get_theme_color_with_alpha(text_view, red_fg_color_names[i], 1.0, &code_fg_rgba)) {
+                code_fg_color_str = g_strdup_printf("rgba(%d,%d,%d,1.000)", 
+                                                    (int)(code_fg_rgba.red * 255), 
+                                                    (int)(code_fg_rgba.green * 255), 
+                                                    (int)(code_fg_rgba.blue * 255));
+                break;
+            }
+        }
+        
+        // Get blue color for code blocks
+        for (int i = 0; blue_color_names[i] && !codeblock_bg_color_str; i++) {
+            if (get_theme_color_with_alpha(text_view, blue_color_names[i], is_dark ? 0.3 : 0.5, &codeblock_bg_rgba)) {
+                // Convert RGBA to string - use integer alpha to avoid locale decimal issues
+                int alpha_int = (int)(codeblock_bg_rgba.alpha * 1000); // Convert to integer (0.5 -> 500)
+                codeblock_bg_color_str = g_strdup_printf("rgba(%d,%d,%d,0.%03d)", 
+                                                        (int)(codeblock_bg_rgba.red * 255), 
+                                                        (int)(codeblock_bg_rgba.green * 255), 
+                                                        (int)(codeblock_bg_rgba.blue * 255), 
+                                                        alpha_int);
+                break;
+            }
+        }
+    }
+    
+    // Fallback to theme-appropriate colors if theme lookup failed
+    const char* code_bg_color = code_bg_color_str ? code_bg_color_str : 
+                                (is_dark ? "rgba(192, 97, 203, 0.3)" : "rgba(246, 97, 81, 0.2)"); // Red tones
+    
+    code_fg_color = code_fg_color_str ? code_fg_color_str :
+                    (is_dark ? "#ff6b6b" : "#c92a2a"); // Red text colors
+    
+    const char* codeblock_bg_color = codeblock_bg_color_str ? codeblock_bg_color_str :
+                                     (is_dark ? "rgba(28, 113, 216, 0.3)" : "rgba(153, 193, 241, 0.5)"); // Blue tones
 
     if (code_tag) {
         g_object_set(code_tag,
@@ -352,14 +616,70 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     }
 
     if (codeblock_tag) {
+        // Only paragraph-wide background to avoid darker blue behind glyphs ("blue on blue").
         g_object_set(codeblock_tag,
-                     "background", codeblock_bg_color, // Background for the text itself
-                     "paragraph-background", codeblock_bg_color, // Background for the entire paragraph block
+                     "background", NULL,
+                     "background-rgba", NULL,
+                     "paragraph-background", codeblock_bg_color,
                      "foreground", codeblock_fg_color,
+                     "background-full-height", FALSE,
                      NULL);
     } else {
          g_warning("Failed to get or create 'codeblock' tag during theme update.");
     }
+
+    if (codeblock_indented_tag) {
+        // Same colors as regular codeblock but with more prominent indentation
+        g_object_set(codeblock_indented_tag,
+                     "background", NULL,
+                     "background-rgba", NULL,
+                     "paragraph-background", codeblock_bg_color,
+                     "foreground", codeblock_fg_color,
+                     "background-full-height", FALSE,
+                     NULL);
+    } else {
+         g_warning("Failed to get or create 'codeblock_indented' tag during theme update.");
+    }
+
+    if (hr_tag) {
+        // Style horizontal rules with appropriate theme colors
+        GdkRGBA hr_color;
+        
+        // Use theme border/outline color
+        if (is_dark) {
+            hr_color = (GdkRGBA){0.6, 0.6, 0.6, 0.8}; // Light gray for dark theme
+        } else {
+            hr_color = (GdkRGBA){0.4, 0.4, 0.4, 0.7}; // Dark gray for light theme
+        }
+        
+        g_object_set(hr_tag,
+                     "foreground-rgba", &hr_color,
+                     NULL);
+    } else {
+         g_warning("Failed to get or create 'hr' tag during theme update.");
+    }
+    
+    // Update blockquote margins consistently and set the stripe color tag
+    GtkTextTagTable *tbl = gtk_text_buffer_get_tag_table(buffer);
+    gtk_text_tag_table_foreach(tbl, update_blockquote_tag, GINT_TO_POINTER(is_dark));
+
+    // Setup the stripe tag color (used for the inserted hair spaces)
+    GtkTextTag *stripe = gtk_text_tag_table_lookup(tbl, "blockquote_stripe");
+    if (!stripe) {
+        stripe = gtk_text_buffer_create_tag(buffer, "blockquote_stripe",
+                                            "foreground-rgba", &(GdkRGBA){0,0,0,0},
+                                            NULL);
+        g_object_set_data_full(G_OBJECT(stripe), "tag-name", g_strdup("blockquote_stripe"), g_free);
+    }
+    GdkRGBA stripe_rgba;
+    if (is_dark) { stripe_rgba.red=0.8; stripe_rgba.green=0.8; stripe_rgba.blue=0.8; stripe_rgba.alpha=0.8; }
+    else { stripe_rgba.red=0.7; stripe_rgba.green=0.7; stripe_rgba.blue=0.7; stripe_rgba.alpha=1.0; }
+    g_object_set(stripe, "background-rgba", &stripe_rgba, NULL);
+    
+    // Cleanup dynamically allocated color strings
+    g_free(code_bg_color_str);
+    g_free(code_fg_color_str);
+    g_free(codeblock_bg_color_str);
 }
 
 static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter *iter, const char *text, GSList *active_tags) {
@@ -431,7 +751,6 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
     char tag_name_buffer[4]; // Buffer for constructing tag names like "h1", "h2", etc.
     gboolean is_block_node = FALSE;
     gboolean needs_trailing_newline = FALSE;
-    gboolean needs_paragraph_separation = FALSE;
 
     // Determine if current node is a block node and what kind of spacing it needs
     switch (type) {
@@ -442,43 +761,30 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
         case CMARK_NODE_BLOCK_QUOTE:
         case CMARK_NODE_CODE_BLOCK:
         case CMARK_NODE_HTML_BLOCK:
-        case CMARK_NODE_HEADING:
         case CMARK_NODE_THEMATIC_BREAK:
             is_block_node = TRUE;
             needs_trailing_newline = TRUE;
-            needs_paragraph_separation = TRUE; // These need blank lines before next paragraph
+            break;
+        case CMARK_NODE_HEADING:
+            // Headings should not force a blank line; keep a single trailing newline
+            is_block_node = TRUE;
+            needs_trailing_newline = TRUE;
             break;
         case CMARK_NODE_PARAGRAPH:
             is_block_node = TRUE;
             needs_trailing_newline = TRUE;
-            // Check if next sibling is also a paragraph - if so, needs blank line
-            {
-                cmark_node *next_sibling = cmark_node_next(node);
-                if (next_sibling && cmark_node_get_type(next_sibling) == CMARK_NODE_PARAGRAPH) {
-                    needs_paragraph_separation = TRUE;
-                }
-            }
             break;
         case CMARK_NODE_LIST:
             is_block_node = TRUE;
             needs_trailing_newline = TRUE;
-            // Ensure a blank line between a list and a following paragraph
-            {
-                cmark_node *next_sibling = cmark_node_next(node);
-                if (next_sibling && cmark_node_get_type(next_sibling) == CMARK_NODE_PARAGRAPH) {
-                    needs_paragraph_separation = TRUE;
-                }
-            }
             break;
         case CMARK_NODE_ITEM:
             is_block_node = TRUE;
             needs_trailing_newline = TRUE;
-            needs_paragraph_separation = FALSE; // Items handle their own spacing
             break;
         default:
             is_block_node = FALSE;
             needs_trailing_newline = FALSE;
-            needs_paragraph_separation = FALSE;
             break;
     }
 
@@ -507,11 +813,20 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             break;
         }
         case CMARK_NODE_LIST:
-            // Push ordered list counter if ordered
-            if (cmark_node_get_list_type(node) == CMARK_ORDERED_LIST) {
-                // Normalize ordered lists to start at 1 for export consistency
-                int start = 1;
-                g_array_append_val(ol_counter_stack, start);
+            // Push list state for this nesting level
+            {
+                ListCtx ctx = {0};
+                cmark_list_type lt = cmark_node_get_list_type(node);
+                ctx.ordered = (lt == CMARK_ORDERED_LIST);
+                ctx.tight = cmark_node_get_list_tight(node);
+                if (ctx.ordered) {
+                    int start = cmark_node_get_list_start(node);
+                    if (start < 1) start = 1;
+                    ctx.next_number = start;
+                    cmark_delim_type dt = cmark_node_get_list_delim(node);
+                    ctx.delim_char = (dt == CMARK_PAREN_DELIM) ? ')' : '.';
+                }
+                g_array_append_val(ol_counter_stack, ctx);
             }
             // No direct insertion for the list container; items will handle markers/indentation.
             break;
@@ -525,29 +840,65 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
                     for (cmark_node *p = parent_list_node; p; p = cmark_node_parent(p)) {
                         if (cmark_node_get_type(p) == CMARK_NODE_LIST) depth++;
                     }
-                    // Indent two spaces per depth-1
+                    // Indent four spaces per level beyond the first, as per CommonMark guidance
                     if (depth > 1) {
-                        GString *indent = g_string_sized_new(depth * 2);
-                        for (int i = 1; i < depth; i++) g_string_append(indent, "  ");
+                        GString *indent = g_string_sized_new(depth * 4);
+                        for (int i = 1; i < depth; i++) g_string_append(indent, "    ");
                         cm_render_insert_with_active_tags(buffer, iter, indent->str, active_tags);
                         g_string_free(indent, TRUE);
                     }
 
-                    cmark_list_type list_type = cmark_node_get_list_type(parent_list_node);
-                    if (list_type == CMARK_ORDERED_LIST) {
-                        // Use stack top as current counter
-                        int idx = ol_counter_stack->len - 1;
-                        int num = 1;
-                        if (idx >= 0) num = g_array_index(ol_counter_stack, int, idx);
-                        char prefix[24];
-                        g_snprintf(prefix, sizeof(prefix), "%d. ", num);
-                        cm_render_insert_with_active_tags(buffer, iter, prefix, active_tags);
-                        // Increment stack top
-                        if (idx >= 0) {
-                            g_array_index(ol_counter_stack, int, idx) = num + 1;
+                    // Render item marker based on current list context
+                    int idx = ol_counter_stack->len - 1;
+                    if (idx >= 0) {
+                        ListCtx *lc = &g_array_index(ol_counter_stack, ListCtx, idx);
+                        if (lc->ordered) {
+                            int num = lc->next_number;
+                            char prefix[32];
+                            g_snprintf(prefix, sizeof(prefix), "%d%c ", num, lc->delim_char ? lc->delim_char : '.');
+                            cm_render_insert_with_active_tags(buffer, iter, prefix, active_tags);
+                            lc->next_number = num + 1;
+                        } else {
+                            if (g_use_visual_bullets) {
+                                // Unordered: render visual bullets depending on depth
+                                const char *bullet = "\xE2\x97\x8F "; // ● default
+                                if (depth >= 3) bullet = "\xE2\x96\xA0 "; // ■
+                                else if (depth == 2) bullet = "\xE2\x97\x8B "; // ○
+
+                                // Ensure a tag exists to mark visual bullets for export replacement
+                                GtkTextTagTable *tt = gtk_text_buffer_get_tag_table(buffer);
+                                GtkTextTag *ul_tag = gtk_text_tag_table_lookup(tt, "ul_bullet");
+                                if (!ul_tag) ul_tag = gtk_text_buffer_create_tag(buffer, "ul_bullet", NULL);
+
+                                // Mark start, insert bullet+space, tag it, then continue with content
+                                GtkTextMark *m = gtk_text_buffer_create_mark(buffer, NULL, iter, TRUE);
+                                cm_render_insert_with_active_tags(buffer, iter, bullet, active_tags);
+                                GtkTextIter s, e;
+                                gtk_text_buffer_get_iter_at_mark(buffer, &s, m);
+                                e = s; gtk_text_iter_forward_char(&e); // bullet char
+                                gtk_text_iter_forward_char(&e);        // trailing space
+                                gtk_text_buffer_apply_tag(buffer, ul_tag, &s, &e);
+                                gtk_text_buffer_delete_mark(buffer, m);
+                            } else {
+                                cm_render_insert_with_active_tags(buffer, iter, "- ", active_tags);
+                            }
                         }
                     } else {
-                        cm_render_insert_with_active_tags(buffer, iter, "- ", active_tags);
+                        // Fallback when context stack is empty
+                        if (g_use_visual_bullets) {
+                            GtkTextTagTable *tt = gtk_text_buffer_get_tag_table(buffer);
+                            GtkTextTag *ul_tag = gtk_text_tag_table_lookup(tt, "ul_bullet");
+                            if (!ul_tag) ul_tag = gtk_text_buffer_create_tag(buffer, "ul_bullet", NULL);
+                            GtkTextMark *m = gtk_text_buffer_create_mark(buffer, NULL, iter, TRUE);
+                            cm_render_insert_with_active_tags(buffer, iter, "\xE2\x97\x8F ", active_tags);
+                            GtkTextIter s, e;
+                            gtk_text_buffer_get_iter_at_mark(buffer, &s, m);
+                            e = s; gtk_text_iter_forward_char(&e); gtk_text_iter_forward_char(&e);
+                            gtk_text_buffer_apply_tag(buffer, ul_tag, &s, &e);
+                            gtk_text_buffer_delete_mark(buffer, m);
+                        } else {
+                            cm_render_insert_with_active_tags(buffer, iter, "- ", active_tags);
+                        }
                     }
                 }
             }
@@ -560,23 +911,83 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
         case CMARK_NODE_CODE_BLOCK:
             // Code blocks handle their own spacing and preserve ALL whitespace exactly
             {
-                cm_render_get_or_create_base_tag(buffer, "codeblock"); // Ensure tag exists using static string
-
                 const char *code_content = cmark_node_get_literal(node);
-                const char *info_str = NULL; // TODO: capture fenced info string when available
+                // Capture fenced code info string (language) when available
+                const char *info_str = NULL;
+                // libcmark provides cmark_node_get_fence_info() for fenced code blocks
+                info_str = cmark_node_get_fence_info(node);
+                
+                // Improved heuristic to determine if this is a fenced or indented code block
+                // Check if we have fence_info (language) or if the content suggests it's fenced
+                gboolean is_fenced = FALSE;
+                
+                if (info_str && strlen(info_str) > 0) {
+                    // Has language info, definitely fenced
+                    is_fenced = TRUE;
+                } else if (code_content) {
+                    // Analyze content to guess block type
+                    // If all non-empty lines start with 4+ spaces, likely indented
+                    // Otherwise, likely fenced (even without language)
+                    const char *line = code_content;
+                    gboolean all_lines_indented = TRUE;
+                    gboolean has_content_lines = FALSE;
+                    
+                    while (*line) {
+                        // Skip to next line or process current line
+                        const char *line_end = strchr(line, '\n');
+                        if (!line_end) line_end = line + strlen(line);
+                        
+                        // Check if line has content (not just whitespace)
+                        gboolean line_has_content = FALSE;
+                        for (const char *p = line; p < line_end; p++) {
+                            if (*p != ' ' && *p != '\t') {
+                                line_has_content = TRUE;
+                                break;
+                            }
+                        }
+                        
+                        if (line_has_content) {
+                            has_content_lines = TRUE;
+                            // Count leading spaces/tabs
+                            int leading_spaces = 0;
+                            for (const char *p = line; p < line_end && (*p == ' ' || *p == '\t'); p++) {
+                                leading_spaces += (*p == '\t') ? 4 : 1; // Tab counts as 4 spaces
+                            }
+                            
+                            // If line doesn't start with 4+ spaces, not an indented block
+                            if (leading_spaces < 4) {
+                                all_lines_indented = FALSE;
+                                break;
+                            }
+                        }
+                        
+                        // Move to next line
+                        if (*line_end == '\n') line = line_end + 1;
+                        else break;
+                    }
+                    
+                    // If we have content and all lines are indented with 4+ spaces,
+                    // it's likely an indented code block. Otherwise, assume fenced.
+                    is_fenced = !(has_content_lines && all_lines_indented);
+                }
+                
+                const char *tag_name = is_fenced ? "codeblock" : "codeblock_indented";
+                
+                cm_render_get_or_create_base_tag(buffer, tag_name); // Ensure tag exists
+
                 if (code_content) {
                     // Mark start
                     GtkTextMark *pre_mark = gtk_text_buffer_create_mark(buffer, NULL, iter, TRUE);
 
-                    // Apply base codeblock tag plus any inherited tags
-                    char *temp_tag_name_for_list = g_strdup("codeblock");
+                    // Apply appropriate codeblock tag plus any inherited tags
+                    char *temp_tag_name_for_list = g_strdup(tag_name);
                     GSList *tags_for_this_code_insertion = g_slist_prepend(active_tags, temp_tag_name_for_list);
                     cm_render_insert_with_active_tags(buffer, iter, code_content, tags_for_this_code_insertion);
                     g_free(tags_for_this_code_insertion->data);
                     g_slist_free_1(tags_for_this_code_insertion);
 
-                    // Apply a unique metadata tag to hold language/info
-                    if (info_str && *info_str) {
+                    // Apply a unique metadata tag to hold language/info (only for fenced blocks)
+                    if (is_fenced && info_str && *info_str) {
                         static int cb_meta_counter = 0;
                         cb_meta_counter++;
                         char *meta_tag_name = g_strdup_printf("codeblock_meta_%d", cb_meta_counter);
@@ -610,7 +1021,7 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             }
             return; // HTML block content is literal.
         case CMARK_NODE_THEMATIC_BREAK:
-            // Unify HR handling: insert "---" and apply the "hr" tag so export can detect it.
+            // Unify HR handling: insert a full-width line and apply the "hr" tag so export can detect it.
             // Ensure HR starts at a new line
             if (!gtk_text_iter_starts_line(iter)) {
                 gtk_text_buffer_insert(buffer, iter, "\n", -1);
@@ -619,7 +1030,11 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             {
                 char *temp_hr = g_strdup("hr");
                 GSList *tags_for_hr = g_slist_prepend(active_tags, temp_hr); // Apply hr plus any surrounding blockquote tags
-                cm_render_insert_with_active_tags(buffer, iter, "---", tags_for_hr);
+                
+                // Insert a line of em-dashes for better visual effect, but keep export-friendly content
+                // Use Unicode em-dash (U+2014) repeated to create a full line effect
+                const char *hr_visual = "────────────────────────────────────────────────────────────────────────────────";
+                cm_render_insert_with_active_tags(buffer, iter, hr_visual, tags_for_hr);
                 g_free(tags_for_hr->data);
                 g_slist_free_1(tags_for_hr);
             }
@@ -627,6 +1042,34 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             break;
         case CMARK_NODE_PARAGRAPH:
             // Paragraphs themselves don't add a tag, but they manage spacing.
+            // If we're inside a blockquote, insert a thin visual stripe before the text.
+            {
+                int bq_depth = 0;
+                for (GSList *l = active_tags; l != NULL; l = l->next) {
+                    const char *nm = (const char*)l->data;
+                    if (nm && g_str_has_prefix(nm, "blockquote")) bq_depth++;
+                }
+                if (bq_depth > 0 && g_use_visual_bullets) {
+                    GtkTextTag *stripe = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(buffer), "blockquote_stripe");
+                    if (!stripe) {
+                        stripe = gtk_text_buffer_create_tag(buffer, "blockquote_stripe",
+                                                            "foreground-rgba", &(GdkRGBA){0,0,0,0}, // hide any glyph
+                                                            NULL);
+                        g_object_set_data_full(G_OBJECT(stripe), "tag-name", g_strdup("blockquote_stripe"), g_free);
+                    }
+                    // Use several hair spaces U+200A to approximate a thin vertical rule
+                    char stripe_run[64] = {0};
+                    // 6 hair spaces ≈ thin border, tweakable
+                    g_strlcpy(stripe_run, "\xE2\x80\x8A\xE2\x80\x8A\xE2\x80\x8A\xE2\x80\x8A\xE2\x80\x8A\xE2\x80\x8A", sizeof(stripe_run));
+                    GtkTextMark *m = gtk_text_buffer_create_mark(buffer, NULL, iter, TRUE);
+                    gtk_text_buffer_insert(buffer, iter, stripe_run, -1);
+                    GtkTextIter s, e;
+                    gtk_text_buffer_get_iter_at_mark(buffer, &s, m);
+                    e = s; for (int i = 0; i < 6; i++) gtk_text_iter_forward_char(&e);
+                    gtk_text_buffer_apply_tag(buffer, stripe, &s, &e);
+                    gtk_text_buffer_delete_mark(buffer, m);
+                }
+            }
             // The block node newline logic at the end of this function handles paragraph separation.
             break;
         case CMARK_NODE_TEXT:
@@ -638,8 +1081,10 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             }
             break;
         case CMARK_NODE_SOFTBREAK:
-            // According to CommonMark spec, a softbreak is rendered as a space.
-            cm_render_insert_with_active_tags(buffer, iter, " ", active_tags);
+            // Preserve user-entered single newlines while editing by inserting an actual newline.
+            // CommonMark treats this as a soft break (space) for HTML, but in an editor
+            // we want the visual newline to remain intact after a reparse.
+            cm_render_insert_with_active_tags(buffer, iter, "\n", active_tags);
             break;
         case CMARK_NODE_LINEBREAK:
             // Hard line break, render as a newline.
@@ -717,10 +1162,22 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
                         g_string_append(alt_text, cmark_node_get_literal(child));
                     }
                 }
-                
+                // Image title (optional)
+                const char *img_title = cmark_node_get_title(node);
+                // Prefer outer link's URL if image is inside a link
+                const char *open_url = NULL;
+                const char *open_title = NULL;
+                cmark_node *parent = cmark_node_parent(node);
+                if (parent && cmark_node_get_type(parent) == CMARK_NODE_LINK) {
+                    open_url = cmark_node_get_url(parent);
+                    open_title = cmark_node_get_title(parent);
+                }
+                if (!open_url || !*open_url) open_url = url;
+                const char *tooltip_title = (open_title && *open_title) ? open_title : img_title;
+
                 if (url && g_image_fetch_context && g_image_fetch_context->text_view) {
                     // Create the image widget that will immediately start fetching
-                    GtkWidget *image_widget = create_image_widget(alt_text->str, url);
+                    GtkWidget *image_widget = create_image_widget(alt_text->str, url, open_url, tooltip_title);
                     
                     // Create a child anchor in the text buffer
                     GtkTextChildAnchor *anchor = gtk_text_buffer_create_child_anchor(buffer, iter);
@@ -761,15 +1218,16 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
         g_free(tag_name_alloc);
     }
     
-    // Pop from ordered list counter stack if we are leaving a list
-    if (type == CMARK_NODE_LIST && cmark_node_get_list_type(node) == CMARK_ORDERED_LIST) {
+    // Pop from list context stack when leaving any list
+    if (type == CMARK_NODE_LIST) {
         if (ol_counter_stack->len > 0) {
             g_array_remove_index(ol_counter_stack, ol_counter_stack->len - 1);
         }
     }
 
     // After processing a block node and its children, ensure it ends with a newline.
-    // This is crucial for correct paragraph and block spacing.
+    // Then, using cmark SOURCEPOS, preserve any additional blank lines that existed
+    // between this block and the next sibling in the original file.
     if (is_block_node && needs_trailing_newline) {
         // Check if the buffer already ends with a newline at this position
         GtkTextIter prev_char_iter = *iter;
@@ -783,47 +1241,63 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             // If at the beginning of the buffer, we probably need a newline.
             gtk_text_buffer_insert(buffer, iter, "\n", -1);
         }
-
-        // Add an extra newline for paragraph separation
-        if (needs_paragraph_separation) {
-            // Check if there's already a blank line
-            GtkTextIter temp_iter = *iter;
-            gboolean already_blank = FALSE;
-            if (gtk_text_iter_get_offset(&temp_iter) > 1) {
-                gtk_text_iter_backward_chars(&temp_iter, 2);
-                char *two_chars = gtk_text_iter_get_text(&temp_iter, iter);
-                if (strcmp(two_chars, "\n\n") == 0) {
-                    already_blank = TRUE;
+        // Preserve original blank-line count between this node and its next sibling
+        cmark_node *next_sibling = cmark_node_next(node);
+        int gap = 0;
+        if (next_sibling) {
+            int end_line = cmark_node_get_end_line(node);
+            int next_start = cmark_node_get_start_line(next_sibling);
+            gap = next_start - end_line - 1; // number of blank lines in source
+            if (gap > 0) {
+                for (int i = 0; i < gap; i++) {
+                    gtk_text_buffer_insert(buffer, iter, "\n", -1);
                 }
-                g_free(two_chars);
             }
-            if (!already_blank) {
+        }
+        // Fallbacks when SOURCEPOS doesn't expose the visual gap clearly
+        if (gap == 0 && next_sibling && cmark_node_get_type(next_sibling) == CMARK_NODE_PARAGRAPH) {
+            // Ensure a blank line before a paragraph that follows another block
+            if (type == CMARK_NODE_PARAGRAPH ||
+                type == CMARK_NODE_LIST ||
+                type == CMARK_NODE_HEADING ||
+                type == CMARK_NODE_CODE_BLOCK ||
+                type == CMARK_NODE_HTML_BLOCK ||
+                type == CMARK_NODE_BLOCK_QUOTE ||
+                type == CMARK_NODE_THEMATIC_BREAK) {
                 gtk_text_buffer_insert(buffer, iter, "\n", -1);
             }
         }
-    }
-
-    // CRITICAL: CommonMark-compliant block element newline handling
-    if (is_block_node && needs_trailing_newline) {
-        // Ensure block elements end with exactly one newline
-        if (!gtk_text_iter_starts_line(iter)) {
-            gtk_text_buffer_insert(buffer, iter, "\n", -1);
-        }
-        
-        // Add paragraph separation (blank line) when needed
-        if (needs_paragraph_separation) {
-            // Add an additional newline to create a blank line between blocks
+        // Fallback: list followed by list — ensure a visual blank line for readability if gap unknown
+        if (gap == 0 && type == CMARK_NODE_LIST && next_sibling && cmark_node_get_type(next_sibling) == CMARK_NODE_LIST) {
             gtk_text_buffer_insert(buffer, iter, "\n", -1);
         }
     }
 
-    // For loose lists, ensure an extra blank line between items
+    // Ensure loose lists have a blank line between items even when SOURCEPOS
+    // does not report the gap explicitly between item nodes.
     if (type == CMARK_NODE_ITEM) {
         cmark_node *pl = cmark_node_parent(node);
         if (pl && cmark_node_get_type(pl) == CMARK_NODE_LIST && !cmark_node_get_list_tight(pl)) {
-            gtk_text_buffer_insert(buffer, iter, "\n", -1);
+            cmark_node *ns = cmark_node_next(node);
+            if (ns && cmark_node_get_type(ns) == CMARK_NODE_ITEM) {
+                // Ensure there are at least two consecutive newlines here
+                GtkTextIter back = *iter;
+                int nl = 0;
+                if (gtk_text_iter_backward_char(&back) && gtk_text_iter_get_char(&back) == '\n') {
+                    nl++;
+                    GtkTextIter back2 = back;
+                    if (gtk_text_iter_backward_char(&back2) && gtk_text_iter_get_char(&back2) == '\n') nl++;
+                }
+                if (nl < 2) {
+                    gtk_text_buffer_insert(buffer, iter, "\n", -1);
+                }
+            }
         }
     }
+
+    // Note: newline handling is done once above. Avoid duplicating here to prevent extra blank lines.
+
+    // For list items, blank line spacing is preserved using SOURCEPOS logic above.
 }
 
 
@@ -849,8 +1323,11 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     context->soup_session = soup_session;
     context->text_view = text_view;
     g_image_fetch_context = context;
+    // Disable visual bullets in headless contexts (e.g., unit tests)
+    g_use_visual_bullets = (text_view != NULL);
 
-    // 1. Clear the buffer
+    // 1. Clear the buffer (suppress dirty marking while we render)
+    g_object_set_data(G_OBJECT(buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
     GtkTextIter start_clear, end_clear;
     gtk_text_buffer_get_bounds(buffer, &start_clear, &end_clear);
     gtk_text_buffer_delete(buffer, &start_clear, &end_clear);
@@ -864,18 +1341,20 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     // CMARK_OPT_HARDBREAKS: Treat newlines as hard line breaks. (We want default CommonMark behavior)
     // CMARK_OPT_SMART: Use smart punctuation. (Good for display)
     // CMARK_OPT_VALIDATE_UTF8: Ensure UTF-8 validity.
-    int options = CMARK_OPT_SMART | CMARK_OPT_VALIDATE_UTF8;
+    // Enable SOURCEPOS to preserve exact blank-line gaps between blocks
+    size_t md_len = strlen(markdown_text);
+    int options = CMARK_OPT_SMART | CMARK_OPT_VALIDATE_UTF8 | CMARK_OPT_SOURCEPOS;
     g_debug("[parse] Starting CommonMark parsing with options: %d", options);
-    g_debug("[parse] Input text length: %zu", strlen(markdown_text));
+    g_debug("[parse] Input text length: %zu", md_len);
     g_debug("[parse] First 100 chars: %.100s", markdown_text);
-    
+
     cmark_parser *parser = cmark_parser_new(options);
     if (!parser) {
         g_warning("Failed to create cmark_parser.");
         return FALSE;
     }
 
-    cmark_parser_feed(parser, markdown_text, strlen(markdown_text));
+    cmark_parser_feed(parser, markdown_text, md_len);
     cmark_node *document = cmark_parser_finish(parser);
     cmark_parser_free(parser);
 
@@ -890,8 +1369,8 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     GtkTextIter iter;
     gtk_text_buffer_get_start_iter(buffer, &iter);
     GSList *active_tags = NULL; // Start with no active tags
-    // Ordered-list counters stack (int per ordered list nesting level)
-    GArray *ol_counter_stack = g_array_new(FALSE, FALSE, sizeof(int));
+    // List context stack (ordered start, delimiter, tightness) per nesting level
+    GArray *ol_counter_stack = g_array_sized_new(FALSE, FALSE, sizeof(ListCtx), 8);
 
     cm_render_node_content_recursive(document, buffer, &iter, active_tags, ol_counter_stack);
 
@@ -899,8 +1378,10 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     cmark_node_free(document);
 
     // 5. Update theme-dependent tags (like code block backgrounds)
-    // This should be called after all content is inserted and base tags are created.
-    cm_render_update_theme_dependent_tags(buffer);
+    // Skip during headless tests where no Gtk initialization is present.
+    if (text_view) {
+        cm_render_update_theme_dependent_tags(buffer);
+    }
     
     // Ensure buffer ends with a newline if it's not empty, for consistent spacing.
     // This might be too aggressive, consider if it's truly needed.
@@ -921,6 +1402,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
         g_free(g_image_fetch_context);
         g_image_fetch_context = NULL;
     }
+    g_object_set_data(G_OBJECT(buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
     
     return TRUE;
 }
@@ -1068,6 +1550,14 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
     }
     
     GString *md = g_string_new("");
+    
+    // Check user preference for heading format once at the beginning
+    GSettings *settings = g_settings_new("org.gtk.gtktext");
+    gchar *heading_format = g_settings_get_string(settings, "heading-format");
+    gboolean use_setext = g_strcmp0(heading_format, "setext") == 0;
+    g_free(heading_format);
+    g_object_unref(settings);
+    
     GtkTextIter iter;
     gtk_text_buffer_get_start_iter(buffer, &iter);
 
@@ -1085,6 +1575,12 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
     const char *current_image_title = NULL;
     GString *current_image_alt = NULL;
     gboolean at_line_start = TRUE;
+
+    // Setext heading support
+    gboolean currently_in_heading = FALSE;
+    int current_heading_level = 0;
+    int previous_heading_level = 0;
+    GString *current_heading_text = NULL;
 
     GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
 
@@ -1110,21 +1606,24 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
                     g_debug("[export] Found image widget with URL: %s, alt: %s", 
                            image_url, image_alt ? image_alt : "(none)");
                     
-                    // Check if this image is also a link by looking at the surrounding tags
-                    GSList *tags_at_iter = gtk_text_iter_get_tags(&iter);
-                    const char *link_url = NULL;
+                    // Prefer an explicit open-url stored on the widget
+                    const char *link_url = g_object_get_data(G_OBJECT(widget), "open-url");
                     const char *link_title = NULL;
-                    
-                    for (GSList *l = tags_at_iter; l != NULL; l = l->next) {
-                        GtkTextTag *tag = GTK_TEXT_TAG(l->data);
-                        const char *tag_name = get_tag_name_safe(tag);
-                        if (tag_name && g_str_has_prefix(tag_name, "link-")) {
-                            link_url = g_object_get_data(G_OBJECT(tag), "link-url");
-                            link_title = g_object_get_data(G_OBJECT(tag), "link-title");
-                            break;
+                    // If no explicit open-url, fall back to tags at this iter (legacy detection)
+                    if (!link_url || !*link_url || g_strcmp0(link_url, image_url) == 0) {
+                        GSList *tags_at_iter = gtk_text_iter_get_tags(&iter);
+                        for (GSList *l = tags_at_iter; l != NULL; l = l->next) {
+                            GtkTextTag *tag = GTK_TEXT_TAG(l->data);
+                            const char *tag_name = get_tag_name_safe(tag);
+                            if (tag_name && (g_str_has_prefix(tag_name, "link_") || g_str_has_prefix(tag_name, "link-"))) {
+                                link_url = g_object_get_data(G_OBJECT(tag), "link-url");
+                                link_title = g_object_get_data(G_OBJECT(tag), "link-title");
+                                break;
+                            }
                         }
+                        g_slist_free(tags_at_iter);
+                        if (link_url && g_strcmp0(link_url, image_url) == 0) link_url = NULL; // treat as non-link
                     }
-                    g_slist_free(tags_at_iter);
                     
                     // Generate appropriate markdown syntax
                     if (link_url) {
@@ -1182,7 +1681,7 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
                     iter_is_code = TRUE;
                     g_debug("cm_export: code tag at '%c' (in_code=%s)", (char)current_char, currently_in_code ? "TRUE" : "FALSE");
                 }
-                else if (g_strcmp0(tag_name, "codeblock") == 0) iter_is_codeblock_char = TRUE;
+                else if (g_strcmp0(tag_name, "codeblock") == 0 || g_strcmp0(tag_name, "codeblock_indented") == 0) iter_is_codeblock_char = TRUE;
                 else if (g_str_has_prefix(tag_name, "link_")) { // Handle unique link tags
                     iter_is_link = TRUE;
                     link_url = g_object_get_data(G_OBJECT(tag), "link-url");
@@ -1245,23 +1744,110 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
                 continue;
             }
 
+            // Replace visual unordered bullets (●/○/■ tagged with ul_bullet) with '-' for Markdown export
             if (!currently_in_codeblock) {
-                gboolean heading_started_here = FALSE;
-                if (iter_is_h1) { g_string_append(md, "# "); heading_started_here = TRUE; }
-                else if (iter_is_h2) { g_string_append(md, "## "); heading_started_here = TRUE; }
-                else if (iter_is_h3) { g_string_append(md, "### "); heading_started_here = TRUE; }
-                else if (iter_is_h4) { g_string_append(md, "#### "); heading_started_here = TRUE; }
-                else if (iter_is_h5) { g_string_append(md, "##### "); heading_started_here = TRUE; }
-                else if (iter_is_h6) { g_string_append(md, "###### "); heading_started_here = TRUE; }
+                GtkTextIter tmp = iter;
+                // Skip leading spaces (indentation)
+                while (!gtk_text_iter_is_end(&tmp) && gtk_text_iter_get_char(&tmp) == ' ') {
+                    g_string_append_c(md, ' ');
+                    gtk_text_iter_forward_char(&tmp);
+                }
+                // Detect visual bullets (● U+25CF, ○ U+25CB, ■ U+25A0) and emit '- '
+                gunichar bullet = gtk_text_iter_get_char(&tmp);
+                if (bullet == 0x25CF || bullet == 0x25CB || bullet == 0x25A0) {
+                    // Append standard Markdown bullet and skip visual bullet+space in buffer
+                    g_string_append(md, "- ");
+                    // Advance tmp by bullet and following space
+                    gtk_text_iter_forward_char(&tmp);
+                    if (!gtk_text_iter_is_end(&tmp)) gtk_text_iter_forward_char(&tmp);
+                    iter = tmp;
+                    at_line_start = FALSE;
+                    continue;
+                }
+                // Consume the indentation we already emitted and resync current_char
+                iter = tmp;
+                current_char = gtk_text_iter_get_char(&iter);
+            }
 
-                if (!heading_started_here) { 
+            if (!currently_in_codeblock) {
+                // Determine current heading level
+                previous_heading_level = current_heading_level;
+                if (iter_is_h1) current_heading_level = 1;
+                else if (iter_is_h2) current_heading_level = 2;
+                else if (iter_is_h3) current_heading_level = 3;
+                else if (iter_is_h4) current_heading_level = 4;
+                else if (iter_is_h5) current_heading_level = 5;
+                else if (iter_is_h6) current_heading_level = 6;
+                else current_heading_level = 0;
+
+                // Handle heading level transitions
+                if (current_heading_level != previous_heading_level) {
+                    // Finish previous heading if it was Setext (H1/H2) and setext is enabled
+                    if (use_setext && previous_heading_level >= 1 && previous_heading_level <= 2 && 
+                        current_heading_text && current_heading_text->len > 0) {
+                        
+                        g_string_append(md, current_heading_text->str);
+                        g_string_append_c(md, '\n');
+                        
+                        if (previous_heading_level == 1) {
+                            // H1: underline with = characters
+                            for (guint i = 0; i < current_heading_text->len; i++) {
+                                g_string_append_c(md, '=');
+                            }
+                        } else {
+                            // H2: underline with - characters  
+                            for (guint i = 0; i < current_heading_text->len; i++) {
+                                g_string_append_c(md, '-');
+                            }
+                        }
+                        g_string_append_c(md, '\n');
+                    }
+                    
+                    // Start new heading
+                    if (current_heading_level >= 1 && current_heading_level <= 6) {
+                        currently_in_heading = TRUE;
+                        
+                        if (current_heading_text) {
+                            g_string_free(current_heading_text, TRUE);
+                            current_heading_text = NULL;
+                        }
+                        
+                        if (use_setext && current_heading_level <= 2) {
+                            // For H1/H2 with setext preference, prepare to collect text 
+                            current_heading_text = g_string_new("");
+                        } else {
+                            // For all other cases, use ATX format immediately
+                            for (int i = 0; i < current_heading_level; i++) {
+                                g_string_append_c(md, '#');
+                            }
+                            g_string_append_c(md, ' ');
+                        }
+                    } else {
+                        // No longer in a heading
+                        currently_in_heading = FALSE;
+                        if (current_heading_text) {
+                            g_string_free(current_heading_text, TRUE);
+                            current_heading_text = NULL;
+                        }
+                    }
+                }
+
+                if (current_heading_level == 0 || current_heading_level >= 3) { 
                     GtkTextTag *codeblock_tag = gtk_text_tag_table_lookup(tag_table, "codeblock");
-                    if (codeblock_tag && gtk_text_iter_has_tag(&iter, codeblock_tag)) {
+                    GtkTextTag *codeblock_indented_tag = gtk_text_tag_table_lookup(tag_table, "codeblock_indented");
+                    gboolean is_fenced_block = codeblock_tag && gtk_text_iter_has_tag(&iter, codeblock_tag);
+                    gboolean is_indented_block = codeblock_indented_tag && gtk_text_iter_has_tag(&iter, codeblock_indented_tag);
+                    
+                    if (is_fenced_block) {
                         if (iter_code_info && *iter_code_info) {
                             g_string_append_printf(md, "```%s\n", iter_code_info);
                         } else {
                             g_string_append(md, "```\n");
                         }
+                        currently_in_codeblock = TRUE;
+                    } else if (is_indented_block) {
+                        // For indented code blocks, we don't add fence markers
+                        // The indentation is preserved in the content
                         currently_in_codeblock = TRUE;
                     }
                 }
@@ -1439,7 +2025,12 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
             
             // Skip zero-width space characters used for image/link placeholders
             if (current_char != 0x200B) { // Skip zero-width space (U+200B)
-                g_string_append_unichar(md, current_char); // Append the character itself
+                // For Setext headings (H1/H2), collect text only if setext format is enabled and we have a collection buffer
+                if (currently_in_heading && current_heading_text) {
+                    g_string_append_unichar(current_heading_text, current_char);
+                } else {
+                    g_string_append_unichar(md, current_char); // Append the character itself
+                }
             }
             if (currently_in_link && current_link_text && current_char != 0x200B) {
                 g_string_append_unichar(current_link_text, current_char);
@@ -1455,8 +2046,12 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
                 // Check if the *next* char (if any) still has codeblock tag.
                 GtkTextIter next_char_iter = iter;
                 gtk_text_iter_forward_char(&next_char_iter);
-                if (gtk_text_iter_is_end(&next_char_iter) || // End of buffer
-                    !gtk_text_iter_has_tag(&next_char_iter, gtk_text_tag_table_lookup(tag_table, "codeblock"))) {
+                GtkTextTag *codeblock_tag = gtk_text_tag_table_lookup(tag_table, "codeblock");
+                GtkTextTag *codeblock_indented_tag = gtk_text_tag_table_lookup(tag_table, "codeblock_indented");
+                gboolean next_has_codeblock = (codeblock_tag && gtk_text_iter_has_tag(&next_char_iter, codeblock_tag)) ||
+                                             (codeblock_indented_tag && gtk_text_iter_has_tag(&next_char_iter, codeblock_indented_tag));
+                
+                if (gtk_text_iter_is_end(&next_char_iter) || !next_has_codeblock) {
                     // End of code block detected
                 }
             }
@@ -1502,6 +2097,34 @@ advance_only:
         }
         g_string_append(md, "```\n");
     }
+    
+    // Handle any remaining Setext heading at the end of buffer
+    if (use_setext && current_heading_level >= 1 && current_heading_level <= 2 && 
+        current_heading_text && current_heading_text->len > 0) {
+        
+        g_string_append(md, current_heading_text->str);
+        g_string_append_c(md, '\n');
+        
+        if (current_heading_level == 1) {
+            // H1: underline with = characters
+            for (guint i = 0; i < current_heading_text->len; i++) {
+                g_string_append_c(md, '=');
+            }
+        } else {
+            // H2: underline with - characters  
+            for (guint i = 0; i < current_heading_text->len; i++) {
+                g_string_append_c(md, '-');
+            }
+        }
+        g_string_append_c(md, '\n');
+    }
+    
+    // Clean up heading state
+    if (current_heading_text) {
+        g_string_free(current_heading_text, TRUE);
+        current_heading_text = NULL;
+    }
+    
     // Ensure bold/italic are closed if buffer ends mid-format
     if (currently_in_bold && currently_in_italic) g_string_append(md, "***");
     else if (currently_in_bold) g_string_append(md, "**");

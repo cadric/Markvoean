@@ -9,6 +9,23 @@
         document to disk. Use 0 to disable debounced autosave and save immediately.
       </description>
     </key>
+    <key name="last-open-dir" type="s">
+      <default>''</default>
+      <summary>Last used directory for the Open dialog</summary>
+      <description>
+        The absolute filesystem path of the last directory successfully used
+        in the Open File dialog. When set and valid, the dialog will start in
+        this directory to improve user experience.
+      </description>
+    </key>
+    <key name="heading-format" type="s">
+      <default>'atx'</default>
+      <summary>Heading format for markdown export</summary>
+      <description>
+        Format to use when exporting headings to markdown. 'atx' uses # symbols,
+        'setext' uses underlines for H1 (=) and H2 (-) with ATX for H3-H6.
+      </description>
+    </key>
   </schema>
   <!-- Keep schema id and path in sync with application code and install path. -->
   <!-- Installed to: share/glib-2.0/schemas/org.gtk.gtktext.gschema.xml -->
