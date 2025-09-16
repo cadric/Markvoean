@@ -1,16 +1,27 @@
-# [0.2.0] - 2025-09-15 - src/meson.build
-# Changed: Added version header tracking and new GObject source files.
+# [1.0.1] - 2025-09-16 - src/meson.build
+# Changed: Restructured to use modular organization with subprojects
 
+# Include subdirectories
+subdir('app')
+subdir('ui')
+subdir('document')
+subdir('render')
+subdir('core')
+subdir('components')
+subdir('editor')
+
+# Collect all sources from modules
 sources = [
-  'main.c',
-  'cmrender.c',
-  'toolbar.c',
-  'settings.c',
-  'util.c',
-  'document.c',
-  'document_manager.c',
-  'image-widget.c'
+  'main.c'  # Temporary - will be moved to app/
 ]
+
+# Add sources from each module
+sources += ui_lib_sources
+sources += document_lib_sources
+sources += render_lib_sources
+sources += core_lib_sources
+sources += components_lib_sources
+sources += editor_lib_sources
 
 # Build dependencies list
 deps = [gtk4_dep, adwaita_dep, cmark_dep]

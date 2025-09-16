@@ -1,8 +1,8 @@
-# [1.0.6] - 2025-09-16 - meson.build
-# Added: Autosave enable/disable setting - users can now disable autosave in preferences
+# [1.0.8] - 2025-09-16 - meson.build
+# Fixed: GTK allocation warnings and updated to modern GTK4 APIs
 
 project('gtktext', 'c',
-  version: '1.0.6',
+  version: '1.0.8',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

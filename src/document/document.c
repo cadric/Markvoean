@@ -6,7 +6,7 @@
  * Added: GObject type system implementation for document management.
  */
 #include "config.h"
-#include <gtktext/document.h>
+#include <gtktext/document/document.h>
 #include <glib-object.h>
 
 /* ========== META ========== */

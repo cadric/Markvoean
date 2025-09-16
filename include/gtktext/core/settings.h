@@ -6,7 +6,7 @@
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include "cmrender.h"
+#include <gtktext/render/cmrender.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +19,13 @@ extern "C" {
  * @return An AdwDialog instance representing the settings dialog
  */
 AdwDialog* create_settings_window(GtkWindow *parent);
+
+/**
+ * Get the application settings instance
+ *
+ * @return GSettings instance for the application
+ */
+GSettings* gtktext_get_app_settings(void);
 
 #ifdef __cplusplus
 }

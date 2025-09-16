@@ -5,8 +5,8 @@
 #include "config.h"
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
-#include <gtktext/toolbar.h>
-#include <gtktext/cmrender.h>
+#include <gtktext/components/toolbar.h>
+#include <gtktext/render/cmrender.h>
 #include <gtktext/tag_util.h>
 
 /* ========== META ========== */

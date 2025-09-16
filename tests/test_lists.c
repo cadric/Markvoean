@@ -3,7 +3,7 @@
  */
 #include <glib.h>
 #include <gtk/gtk.h>
-#include <gtktext/cmrender.h>
+#include <gtktext/render/cmrender.h>
 
 static char* render_export(const char *markdown) {
     GtkTextBuffer *buffer = gtk_text_buffer_new(NULL);

@@ -4,7 +4,7 @@
 */
 #include "config.h"
 #include <adwaita.h>
-#include <gtktext/util.h>
+#include <gtktext/core/util.h>
 #include <glib-object.h>
 
 /* ========== META ========== */

@@ -7,11 +7,22 @@ if soup_dep.found()
   test_deps += soup_dep
 endif
 
-# Source files for library (all except main.c)
+# Source files for library (all except main.c) - using new module structure
 lib_sources = [
-  '../src/cmrender.c',
-  '../src/toolbar.c',
-  '../src/settings.c'
+  '../src/render/markdown/cmrender.c',
+  '../src/render/markdown/tag_manager.c',
+  '../src/render/visual/theme_styles.c',
+  '../src/components/toolbar/toolbar.c',
+  '../src/core/settings.c',
+  '../src/core/util.c',
+  '../src/document/document.c',
+  '../src/document/document_manager.c',
+  '../src/render/images/image-widget.c',
+  '../src/ui/actions/file_actions.c',
+  '../src/ui/actions/app_actions.c',
+  '../src/ui/dialogs/dialogs.c',
+  '../src/ui/image_embedder.c',
+  '../src/ui/welcome_screen.c'
 ]
 
 # Build a static library for testing (excludes main.c)

@@ -9,9 +9,9 @@
 #include "config.h"
 #endif
 
-#include <gtktext/document_manager.h>
-#include <gtktext/cmrender.h>
-#include <gtktext/util.h>
+#include <gtktext/document/document_manager.h>
+#include <gtktext/render/cmrender.h>
+#include <gtktext/core/util.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gio/gio.h>

@@ -33,6 +33,8 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
  * have appropriate styling. It assumes basic tags have already been
  * created.
  *
+ * NOTE: This function is now implemented in theme_styles.c module.
+ *
  * @param buffer The GtkTextBuffer whose tags need updating.
  */
 void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer);

@@ -8,7 +8,9 @@
    MAJOR RELEASE: Fixed segfault in image widget handling using weak references
  * Changed: Added proper input validation with g_return_if_fail().
  */
-#include <gtktext/cmrender.h>
+#include <gtktext/render/cmrender.h>
+#include <gtktext/render/tag_manager.h>
+#include <gtktext/render/theme_styles.h>
 // #include "gtktext_cmark.h" // Removed as per plan
 #include <adwaita.h> // For AdwStyleManager
 #include <gtk/gtk.h> // Include full gtk.h for all required functions
@@ -17,71 +19,13 @@
 #include <stdio.h>
 #include <cmark.h> // Ensure cmark functions are declared
 
+// Forward declare the image fetch callback type to match main.c pattern
+typedef void (*ImageFetchCallback)(GdkPixbuf *pixbuf, GError *error, gpointer user_data);
+
 // Fast qdata keys for tag name and tag cache
 static GQuark quark_tag_name = 0;
 static GQuark quark_tag_cache = 0;
 
-// Structure for per-buffer tag caching
-typedef struct {
-    GHashTable *map; // key: char* (tag name), value: GtkTextTag*
-} TagCache;
-
-static void tag_cache_free(gpointer p) {
-    TagCache *c = (TagCache *)p;
-    if (!c) return;
-    if (c->map) g_hash_table_destroy(c->map);
-    g_free(c);
-}
-
-// Forward declare the image fetch callback type to match main.c pattern
-typedef void (*ImageFetchCallback)(GdkPixbuf *pixbuf, GError *error, gpointer user_data);
-
-// Local theme color helper (mirrors main.c). Using a static version here avoids
-// linking issues in headless/unit-test builds that don't include main.o.
-static gboolean get_theme_color_with_alpha(GtkWidget *widget, const char *color_name, gdouble alpha, GdkRGBA *result) {
-    (void)widget; // Unused parameter - keeping for API compatibility
-    
-    // Use AdwStyleManager for theme detection
-    AdwStyleManager *sm = adw_style_manager_get_default();
-    gboolean prefer_dark = FALSE;
-    if (sm) {
-        AdwColorScheme cs = adw_style_manager_get_color_scheme(sm);
-        prefer_dark = (cs == ADW_COLOR_SCHEME_FORCE_DARK || cs == ADW_COLOR_SCHEME_PREFER_DARK);
-    }
-    
-    // Define theme-aware colors based on common GTK theme color names
-    if (g_strcmp0(color_name, "theme_fg_color") == 0 || g_strcmp0(color_name, "foreground") == 0) {
-        if (prefer_dark) {
-            gdk_rgba_parse(result, "#ffffff");
-        } else {
-            gdk_rgba_parse(result, "#000000");
-        }
-        result->alpha = alpha;
-        return TRUE;
-    } else if (g_strcmp0(color_name, "theme_bg_color") == 0 || g_strcmp0(color_name, "background") == 0) {
-        if (prefer_dark) {
-            gdk_rgba_parse(result, "#242424");
-        } else {
-            gdk_rgba_parse(result, "#ffffff");
-        }
-        result->alpha = alpha;
-        return TRUE;
-    } else if (g_strcmp0(color_name, "theme_selected_bg_color") == 0 || g_strcmp0(color_name, "accent") == 0) {
-        if (prefer_dark) {
-            gdk_rgba_parse(result, "#78aeed");
-        } else {
-            gdk_rgba_parse(result, "#3584e4");
-        }
-        result->alpha = alpha;
-        return TRUE;
-    }
-    if (prefer_dark) {
-        result->red = 28.0/255.0; result->green = 113.0/255.0; result->blue = 216.0/255.0; result->alpha = alpha;
-    } else {
-        result->red = 153.0/255.0; result->green = 193.0/255.0; result->blue = 241.0/255.0; result->alpha = alpha;
-    }
-    return FALSE;
-}
 
 // Structure to hold parameters needed for immediate image fetching during rendering
 typedef struct {
@@ -104,6 +48,16 @@ typedef struct {
 
 // Macro to silence unused variable warnings (if needed, or manage via compiler flags)
 #define CMRENDER_UNUSED __attribute__((unused))
+
+// Function to free tag cache structure
+static void tag_cache_free(gpointer p)
+{
+    TagCache *cache = (TagCache*)p;
+    if (cache) {
+        if (cache->map) g_hash_table_destroy(cache->map);
+        g_free(cache);
+    }
+}
 
 // Helper function to safely get tag names since gtk_text_tag_get_name isn't directly
 // available or is named differently in GTK4
@@ -571,7 +525,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
         
         // Get red background color for inline code
         for (int i = 0; red_color_names[i] && !code_bg_color_str; i++) {
-            if (get_theme_color_with_alpha(text_view, red_color_names[i], is_dark ? 0.3 : 0.2, &code_bg_rgba)) {
+            if (theme_styles_get_color_with_alpha(text_view, red_color_names[i], is_dark ? 0.3 : 0.2, &code_bg_rgba)) {
                 // Convert RGBA to string - use integer alpha to avoid locale decimal issues
                 int alpha_int = (int)(code_bg_rgba.alpha * 1000); // Convert to integer (0.2 -> 200)
                 code_bg_color_str = g_strdup_printf("rgba(%d,%d,%d,0.%03d)",
@@ -585,7 +539,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
         
         // Get red foreground color for inline code
         for (int i = 0; red_fg_color_names[i] && !code_fg_color_str; i++) {
-            if (get_theme_color_with_alpha(text_view, red_fg_color_names[i], 1.0, &code_fg_rgba)) {
+            if (theme_styles_get_color_with_alpha(text_view, red_fg_color_names[i], 1.0, &code_fg_rgba)) {
                 code_fg_color_str = g_strdup_printf("rgba(%d,%d,%d,1.000)", 
                                                     (int)(code_fg_rgba.red * 255), 
                                                     (int)(code_fg_rgba.green * 255), 
@@ -596,7 +550,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
         
         // Get blue color for code blocks
         for (int i = 0; blue_color_names[i] && !codeblock_bg_color_str; i++) {
-            if (get_theme_color_with_alpha(text_view, blue_color_names[i], is_dark ? 0.3 : 0.5, &codeblock_bg_rgba)) {
+            if (theme_styles_get_color_with_alpha(text_view, blue_color_names[i], is_dark ? 0.3 : 0.5, &codeblock_bg_rgba)) {
                 // Convert RGBA to string - use integer alpha to avoid locale decimal issues
                 int alpha_int = (int)(codeblock_bg_rgba.alpha * 1000); // Convert to integer (0.5 -> 500)
                 codeblock_bg_color_str = g_strdup_printf("rgba(%d,%d,%d,0.%03d)", 

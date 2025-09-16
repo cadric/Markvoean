@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2025-09-16
+
+**FIX: GTK Allocation Warnings and API Modernization**
+
+This release resolves GTK allocation warnings and updates to modern GTK4 APIs for better stability.
+
+### Fixed
+- **GTK GtkGizmo Snapshot Warning**: Fixed "Trying to snapshot GtkGizmo without a current allocation" warning
+- **Deprecated API Usage**: Replaced `gtk_widget_get_allocation` with modern `gtk_widget_get_width/height` APIs
+- **Drawing Safety**: Added allocation checks before triggering widget redraws
+
+### Technical Details
+- Updated `debounced_redraw` function to check widget dimensions before drawing
+- Modernized allocation checking to use GTK4-preferred APIs
+- Improved drawing safety in `src/ui/text_view_interactions.c`
+
+## [1.0.7] - 2025-09-16
+
+**CRITICAL FIX: Segmentation Fault Resolution**
+
+This release resolves a critical segmentation fault that was causing the application to crash when opening files due to infinite recursion in the text view overlay setup.
+
+### Fixed
+- **Infinite Recursion Crash**: Fixed segmentation fault in text view overlay setup that occurred when opening files
+- **Widget Realization Loop**: Replaced problematic `realize` signal with safer `map` signal to prevent recursion
+- **Overlay Setup Safety**: Added recursion prevention mechanisms in blockquote overlay initialization
+
+### Technical Details
+- Modified `text_view_setup_blockquote_overlay` function in `src/ui/text_view_interactions.c`
+- Replaced `on_text_view_realized` callback with `on_text_view_mapped` to avoid widget creation during realization
+- Added recursion detection flags to prevent infinite loops
+
 ## [1.0.6] - 2025-09-16
 
 **FEATURE: Configurable Autosave Control**
@@ -13,27 +45,24 @@ This release adds user control over the autosave functionality, allowing users t
 
 ### Added
 - **Autosave Toggle Setting**: New preference to enable/disable autosave
-  - Accessible via preferences dialog (AdwSwitchRow UI element)
-  - Stored in GSettings as `autosave-enabled` boolean key
-  - Defaults to enabled (true) to preserve existing behavior
+    - Accessible via preferences dialog (AdwSwitchRow UI element)
+    - Stored in GSettings as `autosave-enabled` boolean key
+    - Defaults to enabled (true) to preserve existing behavior
 - **Dynamic Setting Changes**: Autosave can be toggled on/off without restarting the application
-  - Settings changes are applied immediately
-  - DocumentManager responds to GSettings notifications
-
-### Changed
+    - Settings changes are applied immediately
+    - DocumentManager responds to GSettings notifications
+Changed
 - **DocumentManager**: Enhanced to respect autosave-enabled setting
-  - Checks setting before starting autosave timer
-  - Stops autosave when disabled via preferences
-  - Added `document_manager_update_autosave_setting()` API
-- **Settings Dialog**: Updated to include document preferences section
-  - Clear toggle switch with descriptive subtitle
-  - Real-time setting persistence
-
-### Technical Details
+    - Checks setting before starting autosave timer
+    - Stops autosave when disabled via preferences
 - **GSettings Schema**: Added `autosave-enabled` boolean key with proper documentation
+    - Added document_manager_update_autosave_setting() API
+- Settings Dialog: Updated to include document preferences section
+    - Clear toggle switch with descriptive subtitle
+    - Real-time setting persistence
+Technical Details
 - **Signal Handling**: Implemented `changed::autosave-enabled` signal handler
 - **Memory Management**: Proper cleanup of GSettings references in DocumentManager
-
 ## [1.0.5] - 2025-09-16
 
 **CODE QUALITY IMPROVEMENT: Warning Cleanup and Dead Code Removal**
@@ -42,19 +71,17 @@ This release improves code quality by eliminating compiler warnings and removing
 
 ### Changed
 - **Parameter Annotations**: Replaced excessive `G_GNUC_UNUSED` annotations with cleaner `(void)parameter;` pattern
-  - Affects signal handlers in `main.c`, `toolbar.c`, `document_manager.c`, and `cmrender.c`
-  - Improves code readability while maintaining warning suppression
+    - Affects signal handlers in `main.c`, `toolbar.c`, `document_manager.c`, and `cmrender.c`
+    - Improves code readability while maintaining warning suppression
 - **Compiler Warnings**: Eliminated all unused parameter and unused function warnings
-  - Build now produces clean output with no warnings
-
-### Removed
+    - Build now produces clean output with no warnings
+Removed
 - **Dead Functions**: Removed completely unused functions from `cmrender.c`
-  - `close_inline_tags_from_stack()` - never called
-  - `open_inline_tags_for_segment()` - never called  
-  - `free_active_markdown_inline_tag()` - never called
-  - `ActiveMarkdownInlineTag` struct - never used
+    - `close_inline_tags_from_stack()` - never called
+    - `open_inline_tags_for_segment()` - never called
+    - `free_active_markdown_inline_tag()` - never called
+    - `ActiveMarkdownInlineTag` struct - never used
 - **Unused Files**: Removed obsolete `toolbar_new.c` file
-
 ## [1.0.4] - 2025-09-16
 
 **CLEANUP RELEASE: Development Artifacts Removal**
@@ -63,17 +90,16 @@ This release cleans up the workspace by removing temporary files and development
 
 ### Removed
 - **Test Files**: All temporary test files created during development
-  - `test*.md` files (test.md, test_recovery.md, test_cursor.md, test_unsaved.md)
-  - `test*.sh` scripts (test_recovery.sh, test_drafts.sh, test_external_changes.sh, test_phase6.sh, test_statusbar.sh, test_dont_save_fix.sh)
+    - `test*.md` files (test.md, test_recovery.md, test_cursor.md, test_unsaved.md)
+    - `test*.sh` scripts (test_recovery.sh, test_drafts.sh, test_external_changes.sh, test_phase6.sh, test_statusbar.sh, test_dont_save_fix.sh)
 - **Development Documentation**: Completed phase documentation files
-  - `AUDIT_REPORT.md` - DocumentManager audit results (migration complete)
-  - `LEGACY_REMOVAL_COMPLETE.md` - Legacy system removal documentation
-  - `PHASE5_STATUSBAR.md` - Status bar integration phase documentation
-  - `PHASE6_INTEGRATION.md` - main.c integration phase documentation  
-  - `MESON_MIGRATION.md` - Build system migration documentation
-  - `audit_save_system.sh` - Development audit script (no longer needed)
-
-### Changed
+    - `AUDIT_REPORT.md` - DocumentManager audit results (migration complete)
+    - `LEGACY_REMOVAL_COMPLETE.md` - Legacy system removal documentation
+    - `PHASE5_STATUSBAR.md` - Status bar integration phase documentation
+    - `PHASE6_INTEGRATION.md` - main.c integration phase documentation
+    - `MESON_MIGRATION.md` - Build system migration documentation
+    - `audit_save_system.sh` - Development audit script (no longer needed)
+Changed
 - **Workspace Structure**: Streamlined project structure with only essential files
 - **Build System**: Verified clean build after file removal
 
@@ -87,14 +113,14 @@ This release fixes a critical bug in DocumentManager where save_as operations wo
 
 ### Fixed
 - **document_manager.c**: `document_manager_save_as()` infinite loop bug
-  - Added missing `dm->is_untitled = FALSE` when setting file path in save_as
-  - Previously, save_as would set file path but leave is_untitled=TRUE, causing document_manager_save to call save_as again
-  - This caused save operations to fail silently, preventing any saves from working
-  - Bug affected both toolbar save and close-dialog save for untitled documents
+    - Added missing `dm->is_untitled = FALSE` when setting file path in save_as
+    - Previously, save_as would set file path but leave is_untitled=TRUE, causing document_manager_save to call save_as again
+    - This caused save operations to fail silently, preventing any saves from working
+    - Bug affected both toolbar save and close-dialog save for untitled documents
+Technical Details
 
-### Technical Details
 **Root Cause**: In `document_manager_save_as()`, when a file path was provided:
-1. File path was set correctly: `dm->file_path = g_strdup(file_path)`  
+1. File path was set correctly: `dm->file_path = g_strdup(file_path)`
 2. But `dm->is_untitled` remained TRUE
 3. Called `document_manager_save()` which saw is_untitled=TRUE
 4. This triggered another call to `document_manager_save_as()` with NULL path
@@ -110,12 +136,11 @@ This release fixes a critical bug where the save-close workflow was broken due t
 
 ### Fixed
 - **main.c**: Save-close dialog flow now works correctly
-  - `has_unsaved_changes()` - Fixed to use DocumentManager state instead of legacy buffer text comparison
-  - `on_unsaved_changes_dialog_response()` - Fixed to use DocumentManager file state for save-as vs save decision
-  - `on_document_save_completed()` - Added close-after-save logic to properly close app after successful save
-  - Buffer initialization - Added missing app reference storage for save dialog access to DocumentManager
-
-### Changed  
+    - `has_unsaved_changes()` - Fixed to use DocumentManager state instead of legacy buffer text comparison
+    - `on_unsaved_changes_dialog_response()` - Fixed to use DocumentManager file state for save-as vs save decision
+    - `on_document_save_completed()` - Added close-after-save logic to properly close app after successful save
+    - Buffer initialization - Added missing app reference storage for save dialog access to DocumentManager
+Changed
 - **UI State Tracking**: All unsaved changes detection now uses DocumentManager exclusively
 - **Save Dialog Logic**: Dialog responses now query DocumentManager for file state instead of legacy variables
 
@@ -129,32 +154,28 @@ This release completes the DocumentManager migration by permanently removing all
 
 ### Removed
 - **Legacy Save Functions**: Completely removed deprecated functions
-  - `save_buffer_to_file()` - replaced by DocumentManager save operations  
-  - `autosave_buffer()` - replaced by DocumentManager autosave system
-  - `save_timeout_cb()` - replaced by DocumentManager timeout handling
-  - Legacy autosave timeout and debounce variables (`save_timeout_id`, `autosave_delay_ms`)
+    - `save_buffer_to_file()` - replaced by DocumentManager save operations
+    - `autosave_buffer()` - replaced by DocumentManager autosave system
+    - `save_timeout_cb()` - replaced by DocumentManager timeout handling
+    - Legacy autosave timeout and debounce variables (`save_timeout_id`, `autosave_delay_ms`)
 - **Legacy Settings**: Removed old autosave configuration from schema
-  - Removed `autosave-delay-ms` GSettings key - DocumentManager handles autosave internally at 3000ms
-  - Cleaned up settings UI to remove deprecated autosave configuration options
+    - Removed `autosave-delay-ms` GSettings key - DocumentManager handles autosave internally at 3000ms
+    - Cleaned up settings UI to remove deprecated autosave configuration options
 - **Legacy Signal Handlers**: Removed deprecated settings change handlers
-  - Removed `on_setting_changed()` autosave delay processing
-  - Cleaned up GSettings signal connections for removed settings
-
-### Changed
+    - Removed `on_setting_changed()` autosave delay processing
+    - Cleaned up GSettings signal connections for removed settings
+Changed
 - **Version Bumped**: All file headers updated to reflect v1.0.1
 - **Code Cleanup**: Simplified codebase with pure DocumentManager implementation
 - **Schema Simplification**: GSettings schema now only contains active configuration keys
-
-### Fixed
+Fixed
 - **Reduced Complexity**: No more dual save system conflicts or legacy code paths
 - **Memory Optimization**: Removed unused variables and function declarations
 - **Build Cleanliness**: No more unused function warnings for deprecated components
-
-### Migration Notes
+Migration Notes
 - **Automatic Migration**: No user action required - DocumentManager was already active in v1.0.0
 - **Settings Reset**: Users will no longer see autosave interval settings in preferences (handled internally)
 - **API Compatibility**: All public DocumentManager APIs remain unchanged
-
 ## [1.0.0] - 2025-01-16
 
 **MAJOR RELEASE: Complete Save System Overhaul**
@@ -163,49 +184,47 @@ This release represents a complete rewrite of the document save system, implemen
 
 ### Added
 - **Phase 1 - Core Save Infrastructure**: Complete DocumentManager system with atomic file operations
-  - Atomic writes using platform-specific operations (POSIX rename, Windows ReplaceFile)
-  - Comprehensive state machine (CLEAN, DIRTY, SAVING, DRAFT, READONLY, CONFLICT, ERROR)
-  - Fsync-backed data integrity guarantees for zero data loss
-  - Proper error handling and rollback mechanisms
+    - Atomic writes using platform-specific operations (POSIX rename, Windows ReplaceFile)
+    - Comprehensive state machine (CLEAN, DIRTY, SAVING, DRAFT, READONLY, CONFLICT, ERROR)
+    - Fsync-backed data integrity guarantees for zero data loss
+    - Proper error handling and rollback mechanisms
 
 - **Phase 2 - Drafts System**: Automatic draft management for unsaved changes
-  - Automatic draft creation for any unsaved modifications
-  - Draft persistence across application restarts
-  - Intelligent draft cleanup when files are properly saved
-  - Draft location tracking and metadata preservation
+    - Automatic draft creation for any unsaved modifications
+    - Draft persistence across application restarts
+    - Intelligent draft cleanup when files are properly saved
+    - Draft location tracking and metadata preservation
 
 - **Phase 3 - Recovery System**: Crash recovery and session restoration
-  - GKeyFile-based recovery format with metadata preservation
-  - Automatic recovery snapshot creation during editing sessions
-  - Crash detection and recovery prompt on application restart
-  - Recovery file cleanup after successful restoration
+    - GKeyFile-based recovery format with metadata preservation
+    - Automatic recovery snapshot creation during editing sessions
+    - Crash detection and recovery prompt on application restart
+    - Recovery file cleanup after successful restoration
 
 - **Phase 4 - External Change Detection**: Real-time file monitoring and conflict resolution
-  - GFileMonitor integration for real-time external change detection
-  - Intelligent conflict resolution with user choice dialogs
-  - Automatic reload for files without local modifications
-  - External modification tracking and notification system
+    - GFileMonitor integration for real-time external change detection
+    - Intelligent conflict resolution with user choice dialogs
+    - Automatic reload for files without local modifications
+    - External modification tracking and notification system
 
 - **Phase 5 - UI Integration**: Status bar and visual feedback system
-  - Comprehensive status bar showing save status and file location
-  - Real-time status updates for all document state changes
-  - Visual indicators for dirty state, saving progress, and conflicts
-  - Accessibility-compliant status information with proper labeling
+    - Comprehensive status bar showing save status and file location
+    - Real-time status updates for all document state changes
+    - Visual indicators for dirty state, saving progress, and conflicts
+    - Accessibility-compliant status information with proper labeling
 
 - **Phase 6 - Main Application Integration**: Complete replacement of legacy save system
-  - Full DocumentManager integration replacing all legacy save functions
-  - Refactored action_save_cb and action_save_as_cb with robust error handling
-  - Integrated callback system for UI updates and status synchronization
-  - Complete removal of old save infrastructure in favor of DocumentManager API
-
+    - Full DocumentManager integration replacing all legacy save functions
+    - Refactored action_save_cb and action_save_as_cb with robust error handling
+    - Integrated callback system for UI updates and status synchronization
+    - Complete removal of old save infrastructure in favor of DocumentManager API
 ### Changed
 - **document_manager.h**: New comprehensive public API for document lifecycle management
 - **document_manager.c**: Complete implementation of robust save infrastructure with 1000+ lines of production code
 - **main.c**: Full integration with DocumentManager API, replacing all legacy save operations
 - **main_window.ui**: Enhanced UI with integrated status bar for real-time feedback
 - **meson.build**: Updated to version 1.0.0 reflecting the major system overhaul
-
-### Technical Improvements
+Technical Improvements
 - Zero data loss guarantee through atomic operations and fsync
 - Predictable save behavior with comprehensive state management
 - Autosave every 2-5 seconds with intelligent draft management
@@ -213,8 +232,7 @@ This release represents a complete rewrite of the document save system, implemen
 - Comprehensive error handling with user-friendly recovery options
 - Real-time UI feedback for all document operations
 - Memory-safe implementation following GObject best practices
-
-### Testing
+Testing
 - Comprehensive test suite covering all 6 phases
 - Individual test scripts for each component (test_phase*.sh)
 - Integration testing with real file operations
@@ -237,65 +255,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed false positive unsaved changes detection after auto-save by updating DATA_ORIGINAL_TEXT in both save functions
 - Auto-save operations now properly update the baseline content for dirty detection
 - Eliminated unnecessary unsaved changes dialogs when opening and immediately closing documents
-
 ## [0.3.13] - 2025-09-16
 
 ### Fixed
-- Fixed "Don't Save" button causing infinite dialog loop by adding recursion prevention flags
+- Fixed “Don’t Save” button causing infinite dialog loop by adding recursion prevention flags
 - Save button now saves directly to existing file path instead of always showing file dialog
 - Fixed dialog response handling to prevent window close request recursion
 - Enhanced dirty detection with debug output to identify content comparison issues
 - Improved parent window management for proper dialog cleanup
-
 ## [0.3.12] - 2025-09-16
 
 ### Fixed
-- Fixed "Don't Save" button not responding in unsaved changes dialog
+- Fixed “Don’t Save” button not responding in unsaved changes dialog
 - Save button in unsaved changes dialog now shows file dialog for choosing save location
 - Autorecover functionality now properly called on application startup
 - Fixed dialog response handling and parent window management
-
 ## [0.3.11] - 2025-09-15
 
 ### Added
 - Unsaved changes dialog on exit: Prompts user to save, discard, or cancel when closing with unsaved changes
 - Better file content tracking for detecting modifications
-
 ## [0.3.10] - 2025-09-15
 
 ### Fixed
 - Fixed link cursor boundary detection with precise character rectangle checking to prevent cursor extending beyond link text
-
 ## [0.3.9] - 2025-09-15
 
 ### Fixed
 - Improved link cursor hit-testing accuracy using gtk_text_view_get_iter_at_position() with trailing character handling
-
 ## [0.3.8] - 2025-09-15
 
 ### Added
 - Link hover cursor: Cursor changes to pointer when hovering over clickable links in the text view
-
 ## [0.3.7] - 2025-09-15
 
 ### Fixed
-- Fixed "Normal tekst" option to correctly detect and remove heading formatting from rendered text
-
+- Fixed “Normal tekst” option to correctly detect and remove heading formatting from rendered text
 ## [0.3.6] - 2025-09-15
 
 ### Fixed
-- Fixed "Normal tekst" option to properly remove heading formatting instead of adding Heading 1
-
+- Fixed “Normal tekst” option to properly remove heading formatting instead of adding Heading 1
 ## [0.3.5] - 2025-09-15
 
 ### Fixed
 - Fixed heading toolbar buttons to trigger re-rendering immediately when applied
-
 ## [0.3.4] - 2025-09-15
 
 ### Fixed
 - Fixed heading formatting to preserve tight spacing between consecutive headings
-
 ## [0.3.3] - 2025-09-15
 
 ### Fixed
@@ -305,7 +312,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - toolbar.c: Completely rewrote source view toggle with proper widget lifecycle management
 - toolbar.c: Fixed source view crashes after multiple toggles by creating fresh widgets each time
 - toolbar.c: Added proper widget cleanup and validation to prevent GTK assertion failures
-
 ## [0.3.2] - 2025-09-15
 
 ### Fixed
@@ -314,7 +320,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - toolbar.c: Fixed source view crashes on second toggle by properly managing widget references
 - toolbar.c: Redesigned view swapping to use stored scrolled_window and original_text_view references
 - toolbar.c: Fixed GTK widget assertion failures when switching between WYSIWYG and source modes
-
 ## [0.3.1] - 2025-09-15
 
 ### Fixed
@@ -324,7 +329,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - toolbar.c: Removed unsafe manual widget reference management in view swapping
 - toolbar.c: Added proper widget validity checks in source view creation
 - toolbar.c: Fixed heading insertion to work at cursor position instead of selection
-
 ## [0.3.0] - 2025-09-15
 
 ### Added
@@ -335,7 +339,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keyboard shortcuts discovery window
 - Accessible labels and descriptions for all UI elements
 - POT file generation for translations
-
 ## [0.2.0] - 2025-09-15
 
 ### Added
@@ -358,18 +361,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keyboard Shortcuts Window**: Discoverable shortcuts window (ui/shortcuts.ui) with Ctrl+?
 - **i18n Framework**: Complete gettext integration with POT file generation
 - **GObject Type System**: Proper G_DECLARE_FINAL_TYPE + G_DEFINE_TYPE implementation
-  - GtktextDocument: Document management with content, file path, and modified state
-  - GtktextImageWidget: Image widget metadata management for markdown
-  - GtktextUtilState: Utility state management using GObject pattern
+    - GtktextDocument: Document management with content, file path, and modified state
+    - GtktextImageWidget: Image widget metadata management for markdown
+    - GtktextUtilState: Utility state management using GObject pattern
 - **WCAG AA Compliance**: Proper labeling, keyboard navigation, and contrast support
 - **Translation Infrastructure**: POTFILES.in, LINGUAS, and .desktop.in template
-
-### Changed
+Changed
 - Migrated from Make to Meson 1.7.2 build system
-- Updated build configuration to use Meson's native dependency management
+- Updated build configuration to use Meson’s native dependency management
 - Enhanced hardening flags integration through Meson options
 - Improved test execution with proper environment setup
-- Optimized build configuration to use Meson's warning_level instead of manual flags
+- Optimized build configuration to use Meson’s warning_level instead of manual flags
 - File dialog implementation with better error handling
 - Memory management patterns with more consistent GLib usage
 - Reorganized header files to follow GNOME standards (include/gtktext/ structure)
@@ -378,21 +380,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI Files**: Moved XML declaration to top for proper i18n parsing
 - **Util Module**: Converted from simple struct to proper GObject type
 - **Menu Structure**: Added keyboard shortcuts menu item for better accessibility
-
-### Removed
+Removed
 - Makefile and Make build system (fully replaced by Meson)
 - Make-generated obj/ and bin/ directories
 - Legacy build artifacts and temporary files
-- Duplicate warning flags in favor of Meson's warning_level
-
-### Technical Details
+- Duplicate warning flags in favor of Meson’s warning_level
+Technical Details
 - Requires Meson >= 1.7.2 and Ninja >= 1.12.1
 - All dependencies properly detected: GTK4, libadwaita-1, libcmark, libsoup-3.0
 - Test suite fully functional with proper GSettings schema resolution
 - Installation targets preserved: binary, desktop file, icons, UI files, GSettings schema
 - Enhanced memory safety with automatic cleanup patterns
 - Improved rendering performance through optimized tag operations
-
 ## [0.1.0] - Previous releases
 
 ### Added
