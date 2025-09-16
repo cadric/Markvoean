@@ -1,8 +1,8 @@
-# [0.3.0] - 2025-09-15 - meson.build
-# Added: UI compliance, accessibility, i18n, and GObject types
+# [1.0.6] - 2025-09-16 - meson.build
+# Added: Autosave enable/disable setting - users can now disable autosave in preferences
 
 project('gtktext', 'c',
-  version: '0.3.14',
+  version: '1.0.6',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

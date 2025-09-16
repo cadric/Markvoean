@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Main application entry point and UI coordination for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [0.3.11] - 2025-09-15 - main.c
-   Added: Unsaved changes dialog on exit with save/discard/cancel options and better dirty tracking
+   [1.0.1] - 2025-09-16 - main.c
+   Changed: Complete removal of legacy save system functions and variables
 */
 
 #ifdef HAVE_CONFIG_H
@@ -23,6 +23,7 @@
 
 #include <gtktext/toolbar.h>
 #include <gtktext/cmrender.h>
+#include <gtktext/document_manager.h>
 #include <gtktext/settings.h>
 
 /* Buffer data keys for paste→markdown coordination */
@@ -47,7 +48,6 @@ static gboolean on_window_close_request(GtkWindow *window, gpointer user_data);
 static gboolean has_unsaved_changes(GtkTextBuffer *buffer);
 static void show_unsaved_changes_dialog(GtkWindow *parent, GtkTextBuffer *buffer);
 static void on_unsaved_changes_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data);
-static void on_file_save_finish(GObject *source_object, GAsyncResult *res, gpointer user_data);
 static void check_for_autorecover(GtkApplication *app);
 static void show_autorecover_dialog(GtkWindow *parent, const char *autosave_path);
 static void on_autorecover_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data);
@@ -59,6 +59,17 @@ static void action_save_as_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
 static void action_preferences_cb(GSimpleAction *a, GVariant *p, gpointer user_data);
 static void action_about_cb(GSimpleAction *a, GVariant *p, gpointer user_data);
 static void action_shortcuts_cb(GSimpleAction *a, GVariant *p, gpointer user_data);
+
+/* Status bar functions */
+static void update_save_status(GtkApplication *app, const gchar *status);
+static void update_file_location(GtkApplication *app, const gchar *location);
+static void update_status_bar_for_state(GtkApplication *app, DocumentState state, 
+                                       const gchar *file_path);
+
+/* Public status bar API for DocumentManager integration */
+void gtktext_update_status_bar_for_document_state(GtkApplication *app, 
+                                                   DocumentState state, 
+                                                   const gchar *file_path);
 
 /* UI event handlers */
 static void on_embedded_image_pressed(GtkGestureClick *gesture, gint n_press, 
@@ -80,8 +91,8 @@ static void on_text_view_motion(GtkEventControllerMotion *controller, gdouble x,
 /* Dialog completion callbacks */
 static void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res, 
                                       gpointer user_data);
-static void on_save_file_dialog_finish(GObject *source_object, GAsyncResult *res, 
-                                      gpointer user_data);
+static void on_save_as_dialog_finish(GObject *source_object, GAsyncResult *res, 
+                                    gpointer user_data);
 
 /* Welcome screen handlers */
 static void welcome_open_cb(GtkButton *button, gpointer user_data);
@@ -95,17 +106,13 @@ static void app_open(GApplication *application, GFile **files, gint n_files,
                     const gchar *hint);
 
 /* Utility and helper functions */
-static void save_buffer_as_markdown(GtkTextBuffer *buffer);
-static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath);
-static void autosave_buffer(GtkTextBuffer *buffer);
-static gboolean save_timeout_cb(gpointer user_data);
 static void copy_selected_text_as_markdown(GtkTextView *text_view);
 static void zoom_text_view(GtkTextView *text_view, gboolean zoom_in);
 static void setup_file_dialog_filters(GtkFileDialog *dialog);
 static void setup_save_dialog_filters(GtkFileDialog *dialog);
 static void setup_blockquote_overlay(GtkTextView *text_view);
 static void embed_images_in_text_view(GtkTextView *text_view);
-static void on_setting_changed(GSettings *settings, gchar *key, gpointer user_data);
+/* Legacy settings handler removed */
 
 /* Drawing and overlay functions */
 static void on_bq_overlay_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, 
@@ -161,8 +168,6 @@ static void remote_image_ctx_free(RemoteImageCtx *c);
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 static guint buffer_changed_signal_id = 0;     /* Store the signal handler ID */
-static guint save_timeout_id = 0;              /* Debounced autosave timeout ID */
-static guint autosave_delay_ms = 500;          /* Debounce delay (from GSettings if available) */
 static GSettings *app_settings = NULL;         /* org.gtk.gtktext settings */
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -372,15 +377,7 @@ static void zoom_text_view(GtkTextView *text_view, gboolean zoom_in)
     g_object_set_data_full(G_OBJECT(text_view), "zoom-level", zoom_ptr, g_free);
 }
 
-/* Determines the full path for the save file */
-static gchar* get_save_file_path(void)
-{
-    const gchar *doc_dir = g_get_user_special_dir(G_USER_DIRECTORY_DOCUMENTS);
-    if (!doc_dir) {
-        doc_dir = g_get_home_dir(); /* Fallback to home directory if Documents isn't found */
-    }
-    return g_build_filename(doc_dir, "mini_text_editor.md", NULL);
-}
+/* Legacy get_save_file_path function removed - DocumentManager handles file paths */
 
 /* Helper function to set up file filters for open dialogs */
 static void setup_file_dialog_filters(GtkFileDialog *dialog)
@@ -488,129 +485,7 @@ void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len,
     g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID, GUINT_TO_POINTER(id));
 }
 
-/* Saves the content of the GtkTextBuffer to the predefined save file as markdown */
-static void save_buffer_as_markdown(GtkTextBuffer *buffer)
-{
-    /* Ensure buffer is valid before proceeding */
-    if (!buffer || !GTK_IS_TEXT_BUFFER(buffer)) {
-        g_warning("save_buffer_as_markdown: Invalid text buffer provided.");
-        return;
-    }
-    
-    g_autofree gchar *filename = get_save_file_path();
-    if (!filename) {
-        g_warning("Cannot save: Failed to determine save file path");
-        return;
-    }
-    
-    /* Always convert current buffer content to markdown */
-    g_autofree char *md = cm_render_buffer_to_markdown(buffer);
-    if (!md) {
-        g_warning("Cannot save: Failed to convert buffer to markdown");
-        return;
-    }
-
-    /* Save to file with backup recovery */
-    g_autoptr(GError) error = NULL;
-    if (!g_file_set_contents(filename, md, -1, &error)) {
-        g_warning("Error saving file: %s", error->message);
-
-        /* Attempt autosave to temporary location for recovery */
-        const gchar *temp_dir = g_get_tmp_dir();
-        g_autofree gchar *autosave_path = g_build_filename(temp_dir, 
-                                                           "gtktext-autosave.md", NULL);
-        g_autoptr(GError) autosave_error = NULL;
-        if (g_file_set_contents(autosave_path, md, -1, &autosave_error)) {
-            g_message("Content autosaved to temporary file: %s", autosave_path);
-        } else {
-            g_critical("Critical: Failed to save content anywhere! %s", 
-                      autosave_error->message);
-        }
-    } else {
-        g_print("Buffer saved as markdown to: %s\n", filename);
-
-        /* Update original text to current content since we just saved */
-        GtkTextIter start, end;
-        gtk_text_buffer_get_bounds(buffer, &start, &end);
-        g_autofree gchar *current_content = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-        g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_content), g_free);
-    }
-}
-
-/* Saves the content of the GtkTextBuffer to a specific file path as markdown */
-static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath)
-{
-    /* Ensure buffer is valid before proceeding */
-    if (!buffer || !GTK_IS_TEXT_BUFFER(buffer)) {
-        g_warning("save_buffer_to_file: Invalid text buffer provided.");
-        return;
-    }
-    if (!filepath || !*filepath) {
-        g_warning("save_buffer_to_file: Invalid file path provided.");
-        return;
-    }
-    
-    /* Always convert current buffer content to markdown */
-    g_autofree char *md = cm_render_buffer_to_markdown(buffer);
-    if (!md) {
-        g_warning("Cannot save: Failed to convert buffer to markdown");
-        return;
-    }
-
-    /* Save to file with improved error handling */
-    g_autoptr(GError) error = NULL;
-    if (!g_file_set_contents(filepath, md, -1, &error)) {
-        g_warning("Error saving file to %s: %s", filepath, error->message);
-
-        /* Enhanced recovery: attempt to save to backup location */
-        g_autofree gchar *backup_path = g_strdup_printf("%s.backup", filepath);
-        g_autoptr(GError) backup_error = NULL;
-        if (g_file_set_contents(backup_path, md, -1, &backup_error)) {
-            g_message("Content saved to backup file: %s", backup_path);
-        } else {
-            g_warning("Failed to save backup: %s", backup_error->message);
-        }
-    } else {
-        g_message("Buffer saved as markdown to: %s", filepath);
-        /* Reset dirty flag since we've saved */
-        g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
-
-        /* Update original text to current content since we just saved */
-        GtkTextIter start, end;
-        gtk_text_buffer_get_bounds(buffer, &start, &end);
-        g_autofree gchar *current_content = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-        g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_content), g_free);
-    }
-}
-
-/* Smart autosave that saves to current file location if known, or default location */
-static void autosave_buffer(GtkTextBuffer *buffer)
-{
-    /* Get the application from the buffer's associated view */
-    GtkTextView *text_view = GTK_TEXT_VIEW(g_object_get_data(G_OBJECT(buffer), 
-                                                             "gtktext-view"));
-    if (text_view) {
-        GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(text_view));
-        GtkApplication *app = NULL;
-        if (GTK_IS_WINDOW(root)) {
-            app = gtk_window_get_application(GTK_WINDOW(root));
-        }
-        
-        if (app) {
-            /* Check if we have a current file path */
-            const char *current_path = (const char*)g_object_get_data(G_OBJECT(app), 
-                                                                     "current_file_path");
-            if (current_path && *current_path) {
-                /* Save to the current file location */
-                save_buffer_to_file(buffer, current_path);
-                return;
-            }
-        }
-    }
-    
-    /* Fallback: save to default location if no current path is known */
-    save_buffer_as_markdown(buffer);
-}
+/* Legacy save function removed - DocumentManager handles all save operations */
 
 /* Konverterer valgt tekst til markdown og kopierer til udklipsholderen */
 static void copy_selected_text_as_markdown(GtkTextView *text_view)
@@ -1086,12 +961,17 @@ static void embed_images_in_text_view(GtkTextView *text_view)
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 /* Click handler for embedded images: opens the image URL via GtkUriLauncher */
-static void on_embedded_image_pressed(G_GNUC_UNUSED GtkGestureClick *gesture, 
-                                     G_GNUC_UNUSED gint n_press, 
-                                     G_GNUC_UNUSED gdouble x, 
-                                     G_GNUC_UNUSED gdouble y, 
+static void on_embedded_image_pressed(GtkGestureClick *gesture, 
+                                     gint n_press, 
+                                     gdouble x, 
+                                     gdouble y, 
                                      gpointer user_data)
 {
+    (void)gesture;  // Unused parameters
+    (void)n_press;
+    (void)x;
+    (void)y;
+    
     GtkWidget *widget = GTK_WIDGET(user_data);
     /* Prefer an outer link target if provided; fall back to the image URL */
     const char *url = (const char*) g_object_get_data(G_OBJECT(widget), "open-url");
@@ -1309,11 +1189,13 @@ static void on_http_image_fetched(SoupSession *session, GAsyncResult *res,
 #endif
 
 /* Handle link clicks in text view */
-static void on_text_view_link_clicked(G_GNUC_UNUSED GtkGestureClick *gesture, 
-                                     G_GNUC_UNUSED gint n_press, 
+static void on_text_view_link_clicked(GtkGestureClick *gesture, 
+                                     gint n_press, 
                                      gdouble x, gdouble y, 
                                      gpointer user_data)
 {
+    (void)gesture;  // Unused parameters  
+    (void)n_press;
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextIter iter;
 
@@ -1351,25 +1233,7 @@ static void on_text_view_link_clicked(G_GNUC_UNUSED GtkGestureClick *gesture,
     }
 }
 
-/* Save timeout callback */
-static gboolean save_timeout_cb(gpointer user_data)
-{
-    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
-    save_timeout_id = 0; /* reset first to avoid races */
-    autosave_buffer(buffer);
-    return G_SOURCE_REMOVE;
-}
-
-/* Settings change handler */
-static void on_setting_changed(GSettings *settings, gchar *key, 
-                              G_GNUC_UNUSED gpointer user_data)
-{
-    if (g_strcmp0(key, "autosave-delay-ms") == 0) {
-        guint val = g_settings_get_uint(settings, "autosave-delay-ms");
-        autosave_delay_ms = val;
-        g_message("Updated autosave delay to %u ms", autosave_delay_ms);
-    }
-}
+/* Settings change handler - no longer needed since autosave settings removed */
 
 /* Re-parse the whole buffer using cm_render_markdown_to_buffer */
 static gboolean reparse_markdown_cb(gpointer user_data)
@@ -1432,8 +1296,9 @@ static gboolean reparse_markdown_cb(gpointer user_data)
 /* Detect paste-like insertions and schedule a reparse of the buffer */
 static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, 
                                  gchar *text, gint len, 
-                                 G_GNUC_UNUSED gpointer user_data)
+                                 gpointer user_data)
 {
+    (void)user_data;
     if (!buffer || !text || len <= 0) return;
     /* Ignore programmatic changes from our own re-rendering */
     if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE)) != 0) {
@@ -1486,6 +1351,8 @@ static void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res
             g_debug("[file-dialog] saved last-open-dir=%s", dir);
         }
     }
+    
+    /* Load file content */
     g_autofree char *contents = NULL;
     gsize len = 0;
     GError *err = NULL;
@@ -1494,18 +1361,31 @@ static void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res
         g_clear_error(&err);
         return;
     }
+    
     GtkApplication *app = GTK_APPLICATION(user_data);
+    DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
+    if (!dm) {
+        g_warning("DocumentManager not found in application data");
+        return;
+    }
+    
     GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
     GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "main_stack"));
     if (!text_view || !main_stack) return;
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
     
-    /* Store the current file path for future saves */
-    g_object_set_data_full(G_OBJECT(app), "current_file_path", g_strdup(path), g_free);
+    /* Open file through DocumentManager */
+    GError *open_error = NULL;
+    if (!document_manager_open_file(dm, path, &open_error)) {
+        g_warning("Failed to open file: %s", open_error ? open_error->message : "Unknown error");
+        g_clear_error(&open_error);
+        return;
+    }
     
-    /* Preserve original text and reset dirty flag */
+    /* Preserve original text and reset dirty flag (for compatibility) */
     g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(contents), g_free);
     g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
+
 #ifdef HAVE_LIBSOUP
     SoupSession *soup_session = g_object_get_data(G_OBJECT(app), "soup_session");
     /* Suppress dirty marking while we render programmatically */
@@ -1605,6 +1485,219 @@ static void welcome_new_cb(GtkButton *button, gpointer user_data)
     g_message("New markdown document created");
 }
 
+/* DocumentManager callback functions */
+
+static void 
+on_document_state_changed(DocumentManager *dm, DocumentState old_state, 
+                         DocumentState new_state, gpointer user_data)
+{
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    const gchar *file_path = document_manager_get_file_path(dm);
+    
+    g_debug("Document state changed: %d -> %d, file: %s", 
+            old_state, new_state, file_path ? file_path : "(none)");
+    
+    /* Update status bar based on new state */
+    gtktext_update_status_bar_for_document_state(app, new_state, file_path);
+    
+    /* Update legacy current_file_path for compatibility */
+    if (file_path) {
+        g_object_set_data_full(G_OBJECT(app), "current_file_path", 
+                              g_strdup(file_path), g_free);
+    } else {
+        g_object_set_data(G_OBJECT(app), "current_file_path", NULL);
+    }
+}
+
+/* Handler for autosave setting changes */
+static void on_autosave_setting_changed(GSettings *settings, const gchar *key, 
+                                       gpointer user_data)
+{
+    (void)settings;
+    (void)key;
+    DocumentManager *dm = (DocumentManager *)user_data;
+    g_return_if_fail(dm != NULL);
+    
+    document_manager_update_autosave_setting(dm);
+}
+
+static void 
+on_document_save_completed(DocumentManager *dm, SaveResult result, 
+                          const gchar *error_message, gpointer user_data)
+{
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    const gchar *file_path = document_manager_get_file_path(dm);
+    
+    g_debug("Save completed: result=%d, file=%s, error=%s", 
+            result, file_path ? file_path : "(none)", 
+            error_message ? error_message : "(none)");
+    
+    switch (result) {
+        case SAVE_RESULT_SUCCESS:
+            update_save_status(app, _("Saved"));
+            if (file_path) {
+                update_file_location(app, file_path);
+            }
+            g_message("Document saved successfully to: %s", file_path);
+            
+            /* Check if we should close the window after successful save */
+            GtkWindow *main_window = gtk_application_get_active_window(app);
+            if (main_window) {
+                GtkWidget *text_view = g_object_get_data(G_OBJECT(main_window), "text_view");
+                if (text_view) {
+                    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+                    gpointer close_after_save = g_object_get_data(G_OBJECT(buffer), "close-after-save");
+                    if (close_after_save) {
+                        g_message("Closing window after successful save");
+                        /* Clear the flag and close */
+                        g_object_set_data(G_OBJECT(buffer), "close-after-save", NULL);
+                        g_object_set_data(G_OBJECT(main_window), "closing-without-dialog", GINT_TO_POINTER(1));
+                        gtk_window_close(main_window);
+                    }
+                }
+            }
+            break;
+            
+        case SAVE_RESULT_ERROR:
+            update_save_status(app, _("Save error"));
+            g_warning("Save failed: %s", error_message ? error_message : "Unknown error");
+            break;
+            
+        case SAVE_RESULT_CANCELLED:
+            update_save_status(app, _("Save cancelled"));
+            g_debug("Save operation was cancelled");
+            break;
+            
+        case SAVE_RESULT_READONLY:
+            update_save_status(app, _("Read-only"));
+            g_warning("Cannot save: file is read-only");
+            break;
+            
+        case SAVE_RESULT_CONFLICT:
+            update_save_status(app, _("External changes detected"));
+            g_warning("Save conflict: external changes detected");
+            break;
+            
+        default:
+            update_save_status(app, _("Unknown save result"));
+            g_warning("Unknown save result: %d", result);
+            break;
+    }
+}
+
+/* Status bar update functions */
+
+static void
+update_save_status(GtkApplication *app, const gchar *status)
+{
+    GtkWindow *main_window;
+    GtkWidget *save_status_label;
+    
+    g_return_if_fail(GTK_IS_APPLICATION(app));
+    g_return_if_fail(status != NULL);
+    
+    main_window = gtk_application_get_active_window(app);
+    if (!main_window) {
+        g_warning("No active window found");
+        return;
+    }
+    
+    save_status_label = g_object_get_data(G_OBJECT(app), "save_status");
+    if (!save_status_label) {
+        g_warning("Save status label not found");
+        return;
+    }
+    
+    gtk_label_set_text(GTK_LABEL(save_status_label), status);
+    g_debug("Updated save status: %s", status);
+}
+
+static void
+update_file_location(GtkApplication *app, const gchar *location)
+{
+    GtkWindow *main_window;
+    GtkWidget *file_location_label;
+    const gchar *display_text;
+    
+    g_return_if_fail(GTK_IS_APPLICATION(app));
+    
+    main_window = gtk_application_get_active_window(app);
+    if (!main_window) {
+        g_warning("No active window found");
+        return;
+    }
+    
+    file_location_label = g_object_get_data(G_OBJECT(app), "file_location");
+    if (!file_location_label) {
+        g_warning("File location label not found");
+        return;
+    }
+    
+    display_text = location ? location : _("Untitled Document");
+    gtk_label_set_text(GTK_LABEL(file_location_label), display_text);
+    g_debug("Updated file location: %s", display_text);
+}
+
+static void
+update_status_bar_for_state(GtkApplication *app, DocumentState state, 
+                           const gchar *file_path)
+{
+    const gchar *status_text;
+    gchar *location_text = NULL;
+    
+    g_return_if_fail(GTK_IS_APPLICATION(app));
+    
+    /* Determine status text based on document state */
+    switch (state) {
+        case DOC_STATE_CLEAN:
+            status_text = _("Saved");
+            break;
+        case DOC_STATE_DIRTY:
+            status_text = _("Modified");
+            break;
+        case DOC_STATE_SAVING:
+            status_text = _("Saving...");
+            break;
+        case DOC_STATE_DRAFT:
+            status_text = _("Draft saved");
+            break;
+        case DOC_STATE_READONLY:
+            status_text = _("Read-only");
+            break;
+        case DOC_STATE_CONFLICT:
+            status_text = _("External changes detected");
+            break;
+        case DOC_STATE_ERROR:
+            status_text = _("Save error");
+            break;
+        default:
+            status_text = _("Unknown");
+            break;
+    }
+    
+    /* Prepare file location text */
+    if (file_path) {
+        gchar *basename = g_path_get_basename(file_path);
+        gchar *dirname = g_path_get_dirname(file_path);
+        location_text = g_strdup_printf("%s — %s", basename, dirname);
+        g_free(basename);
+        g_free(dirname);
+    }
+    
+    update_save_status(app, status_text);
+    update_file_location(app, location_text ? location_text : file_path);
+    
+    g_free(location_text);
+}
+
+/* Helper function for DocumentManager integration (future use) */
+void gtktext_update_status_bar_for_document_state(GtkApplication *app, 
+                                                   DocumentState state, 
+                                                   const gchar *file_path)
+{
+    update_status_bar_for_state(app, state, file_path);
+}
+
 /* App action callbacks */
 static void action_open_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
 {
@@ -1645,26 +1738,25 @@ static void action_save_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
 {
     (void)a; (void)p;
     GtkApplication *app = GTK_APPLICATION(user_data);
-    GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
-    if (!text_view) return;
+    DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
     
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    if (!dm) {
+        g_warning("DocumentManager not found in application data");
+        return;
+    }
     
-    /* Check if we have a current file path */
-    const char *current_path = (const char*)g_object_get_data(G_OBJECT(app), 
-                                                             "current_file_path");
-    if (current_path && *current_path) {
-        /* Save to the current file */
-        save_buffer_to_file(buffer, current_path);
-    } else {
-        /* No current file, trigger Save As dialog */
+    if (document_manager_is_untitled(dm)) {
+        /* Show save dialog for untitled documents */
         action_save_as_cb(a, p, user_data);
+    } else {
+        /* Immediate save for named documents */
+        document_manager_save(dm, FALSE, on_document_save_completed, app);
     }
 }
 
-/* Async save-file completion callback */
-static void on_save_file_dialog_finish(GObject *source_object, GAsyncResult *res, 
-                                      gpointer user_data)
+/* DocumentManager save dialog completion callback */
+static void on_save_as_dialog_finish(GObject *source_object, GAsyncResult *res, 
+                                    gpointer user_data)
 {
     GtkFileDialog *d = GTK_FILE_DIALOG(source_object);
     GError *finish_error = NULL;
@@ -1680,67 +1772,18 @@ static void on_save_file_dialog_finish(GObject *source_object, GAsyncResult *res
     }
     
     GtkApplication *app = GTK_APPLICATION(user_data);
-    GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
-    if (!text_view) return;
-    
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-    g_autofree char *path = g_file_get_path(file);
-    
-    /* Store the current file path for future saves */
-    g_object_set_data_full(G_OBJECT(app), "current_file_path", g_strdup(path), g_free);
-    
-    /* Save the buffer to the selected file */
-    save_buffer_to_file(buffer, path);
-    
-    g_message("Document saved to: %s", path);
-}
-
-/* Async save-file completion callback for unsaved changes dialog */
-static void on_file_save_finish(GObject *source_object, GAsyncResult *res, gpointer user_data)
-{
-    GtkFileDialog *dialog = GTK_FILE_DIALOG(source_object);
-    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
-    GError *error = NULL;
-
-    g_autoptr(GFile) file = gtk_file_dialog_save_finish(dialog, res, &error);
-    if (error) {
-        g_warning("Save dialog finished with error: %s", error->message);
-        g_clear_error(&error);
+    DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
+    if (!dm) {
+        g_warning("DocumentManager not found in application data");
         return;
     }
-    if (!file) {
-        g_debug("Save dialog dismissed without selection");
-        return;
-    }
-
+    
     g_autofree char *path = g_file_get_path(file);
-
-    /* Save the buffer to the selected file */
-    save_buffer_to_file(buffer, path);
-
-    /* Update original text after save to prevent future dirty detection */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    g_autofree gchar *current_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-    g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_text), g_free);
-
-    /* Check if we need to close the window after save */
-    gpointer close_after_save = g_object_get_data(G_OBJECT(buffer), "close-after-save");
-    if (close_after_save) {
-        /* Get the window from the buffer data if available */
-        GtkWidget *window = g_object_get_data(G_OBJECT(buffer), "parent-window");
-        if (window && GTK_IS_WINDOW(window)) {
-            /* Set flag to prevent dialog recursion and close */
-            g_object_set_data(G_OBJECT(window), "closing-without-dialog", GINT_TO_POINTER(1));
-            gtk_window_close(GTK_WINDOW(window));
-        }
-
-        /* Clean up the flags */
-        g_object_set_data(G_OBJECT(buffer), "close-after-save", NULL);
-        g_object_set_data(G_OBJECT(buffer), "parent-window", NULL);
-    }
-
-    g_message("Document saved to: %s", path);
+    
+    /* Use save_as to save to the new location */
+    document_manager_save_as(dm, path, on_document_save_completed, app);
+    
+    g_message("Document save-as initiated for: %s", path);
 }
 
 static void action_save_as_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
@@ -1773,7 +1816,7 @@ static void action_save_as_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
         g_object_unref(init_dir);
     }
     
-    gtk_file_dialog_save(dlg, parent, NULL, on_save_file_dialog_finish, app);
+    gtk_file_dialog_save(dlg, parent, NULL, on_save_as_dialog_finish, app);
     g_object_unref(dlg);
 }
 
@@ -1797,7 +1840,7 @@ static void action_about_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), _("GTKText"));
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "gtktext");
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(about), "GTKText Authors");
-    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "0.3.0");
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "1.0.0");
     adw_dialog_present(about, GTK_WIDGET(parent));
 }
 
@@ -1851,8 +1894,9 @@ static void action_shortcuts_cb(GSimpleAction *a, GVariant *p, gpointer user_dat
 
 static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y, 
                                           gboolean keyboard_mode, GtkTooltip *tooltip, 
-                                          G_GNUC_UNUSED gpointer user_data)
+                                          gpointer user_data)
 {
+    (void)user_data;
     GtkTextView *text_view = GTK_TEXT_VIEW(widget);
     GtkTextIter iter;
 
@@ -1899,11 +1943,28 @@ static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y,
 }
 
 /* Callback triggered when the text in the GtkTextBuffer changes */
-static void on_text_changed(GtkTextBuffer *buffer, G_GNUC_UNUSED gpointer user_data)
+static void on_text_changed(GtkTextBuffer *buffer, gpointer user_data)
 {
+    (void)user_data;
     /* Mark buffer as dirty only for user-initiated edits */
     if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE)) == 0) {
         g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(1));
+        
+        /* Update status bar to show modified status */
+        GtkTextView *text_view = GTK_TEXT_VIEW(g_object_get_data(G_OBJECT(buffer), 
+                                                                 "gtktext-view"));
+        if (text_view) {
+            GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(text_view));
+            if (root && GTK_IS_APPLICATION_WINDOW(root)) {
+                GtkApplication *app = gtk_window_get_application(GTK_WINDOW(root));
+                if (app) {
+                    update_save_status(app, _("Modified"));
+                    
+                    /* DocumentManager should automatically track buffer changes, 
+                       so no need to manually update content here */
+                }
+            }
+        }
         
         /* Only schedule live reparse for specific markdown formatting characters */
         GtkTextIter cursor_iter;
@@ -1944,40 +2005,30 @@ static void on_text_changed(GtkTextBuffer *buffer, G_GNUC_UNUSED gpointer user_d
         }
     }
     
-    /* Debounced autosave: reset pending timer and schedule a save */
-    if (save_timeout_id != 0) {
-        g_source_remove(save_timeout_id);
-        save_timeout_id = 0;
-    }
-    guint delay = autosave_delay_ms;
-    if (delay == 0) {
-        /* Immediate save when delay is disabled */
-        autosave_buffer(buffer);
-        return;
-    }
-    /* Take a ref to buffer for the timeout and unref when done */
-    save_timeout_id = g_timeout_add_full(G_PRIORITY_DEFAULT, delay, save_timeout_cb,
-                                        g_object_ref(buffer), g_object_unref);
+    /* DocumentManager now handles all autosave functionality - old system disabled */
+    /* The DocumentManager will detect buffer changes via its own monitoring */
 }
 
-/* Check if buffer has unsaved changes by comparing current content with original */
+/* Check if buffer has unsaved changes using DocumentManager state */
 static gboolean has_unsaved_changes(GtkTextBuffer *buffer)
 {
     g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
 
-    /* Get current buffer content */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    g_autofree gchar *current_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-
-    /* Get original text when file was loaded/saved */
-    const gchar *original_text = g_object_get_data(G_OBJECT(buffer), DATA_ORIGINAL_TEXT);
-    if (!original_text) {
-        original_text = ""; /* Empty for new documents */
+    /* Get DocumentManager from application */
+    GtkApplication *app = GTK_APPLICATION(g_object_get_data(G_OBJECT(buffer), "app"));
+    if (!app) {
+        g_warning("Application not found in buffer data");
+        return FALSE;
     }
-
-    /* Compare current text with original */
-    return g_strcmp0(current_text, original_text) != 0;
+    
+    DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
+    if (!dm) {
+        g_warning("DocumentManager not found in application data");
+        return FALSE;
+    }
+    
+    /* Use DocumentManager to check for unsaved changes */
+    return document_manager_has_unsaved_changes(dm);
 }
 
 /* Show dialog asking user to save unsaved changes */
@@ -2018,44 +2069,53 @@ static void on_unsaved_changes_dialog_response(AdwAlertDialog *dialog, const cha
     g_message("Dialog response: %s", response);
 
     if (g_strcmp0(response, "save") == 0) {
-        /* Check if there's already a file path - if so, save directly */
-        const char *current_file_path = g_object_get_data(G_OBJECT(window), "current_file_path");
-
-        if (current_file_path && *current_file_path) {
-            /* Save directly to existing file */
-            g_message("Saving to existing file: %s", current_file_path);
-            save_buffer_to_file(buffer, current_file_path);
-
-            /* Update original text after save */
-            GtkTextIter start, end;
-            gtk_text_buffer_get_bounds(buffer, &start, &end);
-            g_autofree gchar *current_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-            g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_text), g_free);
-
-            /* Set flag to prevent recursion and close */
-            g_object_set_data(G_OBJECT(window), "closing-without-dialog", GINT_TO_POINTER(1));
-            gtk_window_close(GTK_WINDOW(window));
+        /* Get DocumentManager to check if we have a file path */
+        GtkApplication *app = GTK_APPLICATION(g_object_get_data(G_OBJECT(buffer), "app"));
+        DocumentManager *doc_manager = g_object_get_data(G_OBJECT(app), "doc_manager");
+        
+        if (!doc_manager) {
+            g_warning("DocumentManager not found for save operation");
+            return;
+        }
+        
+        if (!document_manager_is_untitled(doc_manager)) {
+            /* Save directly to existing file using DocumentManager */
+            const gchar *file_path = document_manager_get_file_path(doc_manager);
+            g_message("Saving to existing file: %s", file_path ? file_path : "(unknown)");
+            
+            /* Set close-after-save flag before starting save */
+            g_object_set_data(G_OBJECT(buffer), "close-after-save", GINT_TO_POINTER(1));
+            
+            document_manager_save(doc_manager, FALSE, on_document_save_completed, app);
         } else {
             /* Show file dialog to choose save location */
-            GtkFileDialog *file_dialog = gtk_file_dialog_new();
-            gtk_file_dialog_set_title(file_dialog, _("Save File"));
-            gtk_file_dialog_set_modal(file_dialog, TRUE);
-
-            /* Set default name */
-            GFile *default_file = g_file_new_for_path("Untitled.md");
-            gtk_file_dialog_set_initial_file(file_dialog, default_file);
-            g_object_unref(default_file);
-
-            gtk_file_dialog_save(file_dialog, GTK_WINDOW(window), NULL,
-                                (GAsyncReadyCallback)on_file_save_finish, buffer);
-
-            g_object_set_data_full(G_OBJECT(buffer), "close-after-save", GINT_TO_POINTER(1), NULL);
-            g_object_unref(file_dialog);
+            g_message("No file path, showing save-as dialog");
+            
+            /* Set close-after-save flag */
+            g_object_set_data(G_OBJECT(buffer), "close-after-save", GINT_TO_POINTER(1));
+            
+            /* Trigger save-as action to show file dialog */
+            if (app) {
+                GSimpleAction *save_as_action = g_simple_action_new("save-as", NULL);
+                action_save_as_cb(save_as_action, NULL, app);
+                g_object_unref(save_as_action);
+            }
         }
     } else if (g_strcmp0(response, "discard") == 0) {
-        /* Close without saving - set flag to prevent dialog recursion */
+        /* Close without saving - discard any drafts and set flag to prevent dialog recursion */
         g_message("Discarding changes and closing");
+        
         if (window && GTK_IS_WINDOW(window)) {
+            /* Get DocumentManager and discard any existing draft */
+            GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+            if (app) {
+                DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
+                if (dm) {
+                    document_manager_discard_current_draft(dm);
+                    g_debug("Draft discarded before closing");
+                }
+            }
+            
             g_object_set_data(G_OBJECT(window), "closing-without-dialog", GINT_TO_POINTER(1));
             gtk_window_close(GTK_WINDOW(window));
         }
@@ -2205,23 +2265,19 @@ static gboolean on_window_close_request(GtkWindow *window, gpointer user_data)
     }
     buffer_changed_signal_id = 0;
 
-    /* Cancel pending autosave */
-    if (save_timeout_id != 0) {
-        g_source_remove(save_timeout_id);
-        save_timeout_id = 0;
-    }
-
     g_message("Allowing default close handling");
     return FALSE; /* Allow default close behavior */
 }
 
 /* Callback for keyboard shortcuts (Ctrl+C and zoom) */
-static gboolean on_key_pressed(G_GNUC_UNUSED GtkEventControllerKey *controller,
+static gboolean on_key_pressed(GtkEventControllerKey *controller,
                               guint keyval,
-                              G_GNUC_UNUSED guint keycode,
+                              guint keycode,
                               GdkModifierType state,
                               gpointer user_data)
 {
+    (void)controller;
+    (void)keycode;
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
 
     if (state & GDK_CONTROL_MASK) {
@@ -2362,13 +2418,16 @@ static void on_text_view_motion(GtkEventControllerMotion *controller, gdouble x,
     }
 }
 
-static void on_map(G_GNUC_UNUSED GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
+static void on_map(GtkWidget *widget, gpointer user_data)
 {
+    (void)widget;
+    (void)user_data;
     g_message("Main window mapped, image widgets already embedded during rendering.");
 }
 
-static void on_window_map(GtkWidget *window, G_GNUC_UNUSED gpointer user_data)
+static void on_window_map(GtkWidget *window, gpointer user_data)
 {
+    (void)user_data;
     g_message("Window mapped, setting welcome screen visibility.");
     GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(window), "main_stack"));
     if (main_stack) {
@@ -2474,6 +2533,21 @@ static void app_activate(GApplication *application)
         return;
     }
     
+    /* Get status bar widgets */
+    GtkWidget *save_status = GTK_WIDGET(gtk_builder_get_object(builder, "save_status"));
+    if (!save_status) {
+        g_critical("Failed to get save_status from UI");
+        g_object_unref(builder);
+        return;
+    }
+    
+    GtkWidget *file_location = GTK_WIDGET(gtk_builder_get_object(builder, "file_location"));
+    if (!file_location) {
+        g_critical("Failed to get file_location from UI");
+        g_object_unref(builder);
+        return;
+    }
+    
     /* Get the main stack widget */
     GtkWidget *main_stack = GTK_WIDGET(gtk_builder_get_object(builder, "main_stack"));
     if (!main_stack) {
@@ -2504,6 +2578,36 @@ static void app_activate(GApplication *application)
     g_object_set_data(G_OBJECT(app), "main_stack", main_stack);
     g_object_set_data(G_OBJECT(app), "welcome_open_button", welcome_open_button);
     g_object_set_data(G_OBJECT(app), "welcome_new_button", welcome_new_button);
+    g_object_set_data(G_OBJECT(app), "save_status", save_status);
+    g_object_set_data(G_OBJECT(app), "file_location", file_location);
+
+    /* Initialize status bar with default values */
+    update_save_status(app, _("Ready"));
+    update_file_location(app, NULL);  /* Shows "Untitled Document" */
+
+    /* Create and initialize DocumentManager */
+    GtkWindow *main_window = gtk_application_get_active_window(app);
+    GtkTextBuffer *dm_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    DocumentManager *doc_manager = document_manager_new(dm_buffer, main_window);
+    if (!doc_manager) {
+        g_critical("Failed to create DocumentManager");
+        g_object_unref(builder);
+        return;
+    }
+    g_object_set_data_full(G_OBJECT(app), "doc_manager", doc_manager, 
+                          (GDestroyNotify)document_manager_free);
+    
+    /* Register DocumentManager callbacks */
+    document_manager_set_state_callback(doc_manager, on_document_state_changed, app);
+    
+    /* Set up GSettings change handler for autosave setting */
+    GSettings *settings = g_settings_new("org.gtk.gtktext");
+    g_signal_connect(settings, "changed::autosave-enabled",
+                    G_CALLBACK(on_autosave_setting_changed), doc_manager);
+    g_object_set_data_full(G_OBJECT(app), "app_settings", settings, g_object_unref);
+    
+    /* Start autosave */
+    document_manager_start_autosave(doc_manager);
 
     /* Create a global soup session for image fetching */
 #ifdef HAVE_LIBSOUP
@@ -2558,19 +2662,17 @@ static void app_activate(GApplication *application)
 
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
 
-    /* Initialize GSettings and load autosave delay */
+    /* Initialize GSettings */
     app_settings = g_settings_new("org.gtk.gtktext");
-    if (app_settings) {
-        autosave_delay_ms = g_settings_get_uint(app_settings, "autosave-delay-ms");
-        g_signal_connect(app_settings, "changed::autosave-delay-ms", 
-                        G_CALLBACK(on_setting_changed), NULL);
-    } else {
-        g_warning("GSettings schema org.gtk.gtktext not found; using default autosave delay %u ms", 
-                 autosave_delay_ms);
+    if (!app_settings) {
+        g_warning("GSettings schema org.gtk.gtktext not found");
     }
     
     /* Keep a back-pointer from buffer to the view for reparse callbacks */
     g_object_set_data(G_OBJECT(buffer), "gtktext-view", text_view);
+    
+    /* Store app reference on buffer for save dialog callbacks */
+    g_object_set_data(G_OBJECT(buffer), "app", app);
     
     /* Store soup session on buffer for reparse callbacks */
 #ifdef HAVE_LIBSOUP
@@ -2651,8 +2753,9 @@ static void app_activate(GApplication *application)
 }
 
 static void app_open(GApplication *application, GFile **files, gint n_files, 
-                    G_GNUC_UNUSED const gchar *hint)
+                    const gchar *hint)
 {
+    (void)hint;
     /* First activate the application to ensure window is created */
     app_activate(application);
     

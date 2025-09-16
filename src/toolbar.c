@@ -10,7 +10,8 @@
 #include <gtktext/tag_util.h>
 
 /* ========== META ========== */
-/* [0.3.0] - 2025-09-15 - src/toolbar.c
+/* [1.0.1] - 2025-09-16 - src/toolbar.c
+   MAJOR RELEASE: Updated version for DocumentManager system integration
  * Changed: Restructured to follow Ultra-Min template pattern.
  * [0.3.5] - 2025-09-15 - Fixed heading toolbar buttons to trigger re-rendering
  * [0.3.6] - 2025-09-15 - Fixed "Normal tekst" to remove heading formatting
@@ -145,7 +146,8 @@ static void toggle_tag_on_selection(GtkTextBuffer *buffer, const char *tag_name,
 }
 
 /* ========== HANDLERS ========== */
-static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+static void on_italic_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
     g_autoptr(GError) error = NULL;
     
     if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
@@ -158,7 +160,8 @@ static void on_italic_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer u
     toggle_tag_on_selection(buffer, "italic", "style", GINT_TO_POINTER(PANGO_STYLE_ITALIC));
 }
 
-static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+static void on_bold_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
     g_autoptr(GError) error = NULL;
     
     if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
@@ -171,7 +174,8 @@ static void on_bold_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
     toggle_tag_on_selection(buffer, "bold", "weight", GINT_TO_POINTER(PANGO_WEIGHT_BOLD));
 }
 
-static void on_code_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+static void on_code_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
     g_autoptr(GError) error = NULL;
     
     if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
@@ -184,7 +188,8 @@ static void on_code_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer use
     toggle_tag_on_selection(buffer, "code", "family", "monospace");
 }
 
-static void on_hr_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+static void on_hr_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
     g_autoptr(GError) error = NULL;
     
     if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
@@ -287,7 +292,8 @@ static void on_heading_button_clicked(GtkButton *button, gpointer user_data) {
     }
 }
 
-static void on_source_view_button_clicked(G_GNUC_UNUSED GtkButton *button, gpointer user_data) {
+static void on_source_view_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
     g_autoptr(GError) error = NULL;
     
     if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {

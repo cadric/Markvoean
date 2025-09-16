@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- [0.2.0] - 2025-09-15 - ui/main_window.ui
-     Changed: Added version header tracking and accessibility improvements.
+<!-- [1.0.0] - 2025-01-16 - ui/main_window.ui
+     MAJOR RELEASE: Status bar integration for DocumentManager system.
 -->
 <interface>
   <requires lib="gtk" version="4.0"/>
@@ -185,6 +185,47 @@
                               <property name="label" translatable="yes">Markdown editor</property>
                               <property name="description" translatable="yes">Main text editor for writing and editing markdown content</property>
                             </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="statusbar">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">6</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="margin-top">3</property>
+                        <property name="margin-bottom">3</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Status bar</property>
+                          <property name="description" translatable="yes">Shows document save status and file location</property>
+                        </accessibility>
+                        <child>
+                          <object class="GtkLabel" id="save_status">
+                            <property name="label">Saved</property>
+                            <property name="xalign">0</property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Save status</property>
+                              <property name="description" translatable="yes">Current save status of the document</property>
+                            </accessibility>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="file_location">
+                            <property name="xalign">1</property>
+                            <property name="hexpand">true</property>
+                            <property name="ellipsize">start</property>
+                            <accessibility>
+                              <property name="label" translatable="yes">File location</property>
+                              <property name="description" translatable="yes">Current file path or document name</property>
+                            </accessibility>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
                           </object>
                         </child>
                       </object>

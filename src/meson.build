@@ -8,6 +8,7 @@ sources = [
   'settings.c',
   'util.c',
   'document.c',
+  'document_manager.c',
   'image-widget.c'
 ]
 

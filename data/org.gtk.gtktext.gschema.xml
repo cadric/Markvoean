@@ -1,17 +1,9 @@
-<!-- [0.2.0] - 2025-09-15 - data/org.gtk.gtktext.gschema.xml
-     Changed: Added version header tracking.
+<!-- [1.0.1] - 2025-09-16 - data/org.gtk.gtktext.gschema.xml
+     Changed: Removed legacy autosave-delay-ms setting - DocumentManager handles autosave internally.
 -->
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gtk.gtktext" path="/org/gtk/gtktext/">
-    <key name="autosave-delay-ms" type="u">
-      <default>500</default>
-      <summary>Autosave delay in milliseconds</summary>
-      <description>
-        The idle delay after the last edit before autosaving the current
-        document to disk. Use 0 to disable debounced autosave and save immediately.
-      </description>
-    </key>
     <key name="last-open-dir" type="s">
       <default>''</default>
       <summary>Last used directory for the Open dialog</summary>
@@ -27,6 +19,14 @@
       <description>
         Format to use when exporting headings to markdown. 'atx' uses # symbols,
         'setext' uses underlines for H1 (=) and H2 (-) with ATX for H3-H6.
+      </description>
+    </key>
+    <key name="autosave-enabled" type="b">
+      <default>true</default>
+      <summary>Enable automatic saving</summary>
+      <description>
+        When enabled, the application will automatically save changes every few seconds
+        to prevent data loss. When disabled, only manual saves will occur.
       </description>
     </key>
   </schema>

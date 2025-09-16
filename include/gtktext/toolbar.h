@@ -1,4 +1,5 @@
-/* [0.3.0] - 2025-09-15 - include/toolbar.h
+/* [1.0.1] - 2025-09-16 - include/toolbar.h
+   MAJOR RELEASE: Updated version for DocumentManager system integration
  * Added: Source view toggle functionality for switching between WYSIWYG and raw markdown.
  */
 #ifndef TOOLBAR_H

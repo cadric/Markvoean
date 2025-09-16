@@ -4,7 +4,8 @@
    TODO: Restructure to follow Ultra-Min template sections
    [0.3.4] Fixed heading formatting to preserve tight spacing between consecutive headings
 */
-/* [0.3.0] - 2025-09-15 - src/cmrender.c
+/* [1.0.1] - 2025-09-16 - src/cmrender.c
+   MAJOR RELEASE: Fixed segfault in image widget handling using weak references
  * Changed: Added proper input validation with g_return_if_fail().
  */
 #include <gtktext/cmrender.h>
@@ -96,7 +97,7 @@ static gboolean g_use_visual_bullets = TRUE;
 
 // Helper structure for image widget async operations
 typedef struct {
-    GtkPicture *picture;
+    GWeakRef picture_ref;  // Use weak reference to avoid dangling pointers
     char *url;
     char *alt_text;
 } ImageWidgetData;
@@ -137,6 +138,7 @@ static void on_image_widget_fetched(SoupSession *session, GAsyncResult *res, gpo
     if (!bytes) {
         g_debug("[image] Image fetch failed for %s: %s", data->url, error ? error->message : "unknown");
         g_clear_error(&error);
+        g_weak_ref_clear(&data->picture_ref);
         g_free(data->url);
         g_free(data->alt_text);
         g_free(data);
@@ -151,12 +153,19 @@ static void on_image_widget_fetched(SoupSession *session, GAsyncResult *res, gpo
     g_object_unref(stream);
     
     if (pixbuf) {
-        // Convert GdkPixbuf to GdkTexture and display
-        GdkTexture *texture = gdk_texture_new_for_pixbuf(pixbuf);
-        gtk_picture_set_paintable(data->picture, GDK_PAINTABLE(texture));
-        g_object_unref(texture);
+        // Try to get the picture widget from weak reference
+        GtkPicture *picture = g_weak_ref_get(&data->picture_ref);
+        if (picture) {
+            // Convert GdkPixbuf to GdkTexture and display
+            GdkTexture *texture = gdk_texture_new_for_pixbuf(pixbuf);
+            gtk_picture_set_paintable(picture, GDK_PAINTABLE(texture));
+            g_object_unref(texture);
+            g_object_unref(picture);  // Release the strong reference from g_weak_ref_get
+            g_debug("[image] Successfully loaded image: %s", data->url);
+        } else {
+            g_debug("[image] Picture widget no longer exists for: %s", data->url);
+        }
         g_object_unref(pixbuf);
-        g_debug("[image] Successfully loaded image: %s", data->url);
     } else {
         g_debug("[image] Failed to decode image %s: %s", data->url, error ? error->message : "unknown");
         g_clear_error(&error);
@@ -165,6 +174,7 @@ static void on_image_widget_fetched(SoupSession *session, GAsyncResult *res, gpo
     g_bytes_unref(bytes);
     
     // Clean up our custom data structure
+    g_weak_ref_clear(&data->picture_ref);
     g_free(data->url);
     g_free(data->alt_text);
     g_free(data);
@@ -208,11 +218,16 @@ static void on_picture_notify_paintable(GObject *object, GParamSpec *pspec, gpoi
 }
 
 // Click handler for image widgets: opens the preferred URL in default handler
-static void on_image_picture_pressed(G_GNUC_UNUSED GtkGestureClick *gesture,
-                                     G_GNUC_UNUSED gint n_press,
-                                     G_GNUC_UNUSED gdouble x,
-                                     G_GNUC_UNUSED gdouble y,
+static void on_image_picture_pressed(GtkGestureClick *gesture,
+                                     gint n_press,
+                                     gdouble x,
+                                     gdouble y,
                                      gpointer user_data) {
+    (void)gesture;  // Unused parameters
+    (void)n_press;
+    (void)x;
+    (void)y;
+    
     GtkWidget *widget = GTK_WIDGET(user_data);
     const char *open = (const char*) g_object_get_data(G_OBJECT(widget), "open-url");
     if (!open || !*open) open = (const char*) g_object_get_data(G_OBJECT(widget), "image-url");
@@ -304,7 +319,7 @@ static GtkWidget *create_image_widget(const char *alt_text, const char *url,
             
             // Create callback data
             ImageWidgetData *img_data = g_new(ImageWidgetData, 1);
-            img_data->picture = GTK_PICTURE(picture);
+            g_weak_ref_init(&img_data->picture_ref, G_OBJECT(picture));
             img_data->url = g_strdup(url);
             img_data->alt_text = g_strdup(alt_text);
             
@@ -323,18 +338,7 @@ static GtkWidget *create_image_widget(const char *alt_text, const char *url,
     return box;
 }
 
-// Helper struct for managing active inline Markdown tags during conversion
-typedef struct {
-    const char *tag_name; // "bold", "italic", "code", "link", "image"
-    char *url;            // For links/images
-    char *title;          // For links
-    // The actual Markdown delimiters (e.g., "**", "*") are handled by the functions
-} ActiveMarkdownInlineTag;
-
 // Forward declarations for static helper functions for buffer_to_markdown
-static void free_active_markdown_inline_tag(gpointer data);
-G_GNUC_UNUSED static void close_inline_tags_from_stack(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, gboolean force_close_all);
-G_GNUC_UNUSED static void open_inline_tags_for_segment(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, G_GNUC_UNUSED GtkTextBuffer *buffer);
 // static char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer); // Declaration removed, will be non-static
 
 // Forward declaration for the recursive helper
@@ -1431,132 +1435,6 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
 
 
 // --- Implementation of cm_render_buffer_to_markdown and its helpers ---
-
-static void free_active_markdown_inline_tag(gpointer data) {
-    ActiveMarkdownInlineTag *tag_data = (ActiveMarkdownInlineTag *)data;
-    if (tag_data) {
-        // tag_name is not owned by this struct, it points to static strings or GtkTextTag names
-        g_free(tag_data->url);
-        g_free(tag_data->title);
-        g_free(tag_data);
-    }
-}
-
-/**
- * @brief Closes Markdown inline tags that are no longer active.
- *
- * Iterates backwards through the active_inline_stack. If a tag on the stack
- * is not found in current_gtk_tags (or if force_close_all is true),
- * it's considered closed. The corresponding Markdown delimiter is appended
- * to md_output, and the tag is removed from the stack.
- *
- * @param md_output The GString to append Markdown to.
- * @param active_inline_stack_ptr Pointer to the GSList of ActiveMarkdownInlineTag.
- * @param current_gtk_tags GSList of GtkTextTag names currently applied to the text segment.
- * @param force_close_all If TRUE, closes all tags on the stack regardless of current_gtk_tags.
- */
-G_GNUC_UNUSED static void close_inline_tags_from_stack(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, gboolean force_close_all) {
-    GSList *iter = *active_inline_stack_ptr;
-    GSList *prev = NULL;
-
-    while (iter != NULL) {
-        ActiveMarkdownInlineTag *active_tag = (ActiveMarkdownInlineTag *)iter->data;
-        gboolean still_active = FALSE;
-        if (!force_close_all) {
-            for (GSList *gtk_tag_iter = current_gtk_tags; gtk_tag_iter != NULL; gtk_tag_iter = gtk_tag_iter->next) {
-                const char *gtk_tag_name = get_tag_name_safe((GtkTextTag*)gtk_tag_iter->data); // Use helper
-                if (gtk_tag_name && g_strcmp0(active_tag->tag_name, gtk_tag_name) == 0) {
-                    still_active = TRUE;
-                    break;
-                }
-            }
-        }
-
-        if (!still_active) { // Tag needs to be closed
-            // Append closing Markdown delimiter
-            if (g_strcmp0(active_tag->tag_name, "bold") == 0) g_string_append(md_output, "**");
-            else if (g_strcmp0(active_tag->tag_name, "italic") == 0) g_string_append(md_output, "*");
-            else if (g_strcmp0(active_tag->tag_name, "code") == 0) g_string_append(md_output, "`");
-            else if (g_strcmp0(active_tag->tag_name, "link") == 0) {
-                g_string_append_printf(md_output, "](%s%s%s)",
-                                       active_tag->url ? active_tag->url : "",
-                                       (active_tag->url && active_tag->title) ? " \"" : "",
-                                       active_tag->title ? active_tag->title : "");
-                if (active_tag->title) g_string_append(md_output, "\""); // Ensure title quote is closed if present
-            }
-            // Note: Images are typically self-closing or handled differently, not usually on a stack like this.
-            // For this example, we assume 'image' tag isn't pushed onto this particular stack
-            // or would be handled by a more specific mechanism if it were.
-
-            // Remove from stack and free
-            GSList *next = iter->next;
-            if (prev) {
-                prev->next = next;
-            } else {
-                *active_inline_stack_ptr = next;
-            }
-            free_active_markdown_inline_tag(active_tag);
-            g_slist_free_1(iter); // Free the list link itself
-            iter = next;
-        } else {
-            prev = iter;
-            iter = iter->next;
-        }
-    }
-}
-
-/**
- * @brief Opens new Markdown inline tags based on the current GtkTextTags.
- *
- * Iterates through current_gtk_tags. If a tag is not already on the
- * active_inline_stack, it's considered newly opened. The corresponding
- * Markdown delimiter is appended to md_output, and the tag is added to the stack.
- *
- * @param md_output The GString to append Markdown to.
- * @param active_inline_stack_ptr Pointer to the GSList of ActiveMarkdownInlineTag.
- * @param current_gtk_tags GSList of GtkTextTag names currently applied to the text segment.
- * @param buffer The GtkTextBuffer (used to fetch URL/title for links).
- */
-G_GNUC_UNUSED static void open_inline_tags_for_segment(GString *md_output, GSList **active_inline_stack_ptr, GSList *current_gtk_tags, G_GNUC_UNUSED GtkTextBuffer *buffer) {
-    // Iterate through current GTK tags to see which ones need to be opened
-    for (GSList *gtk_tag_iter = current_gtk_tags; gtk_tag_iter != NULL; gtk_tag_iter = gtk_tag_iter->next) {
-        GtkTextTag *current_gtk_tag_obj = (GtkTextTag*)gtk_tag_iter->data;
-        const char *current_tag_name = get_tag_name_safe(current_gtk_tag_obj); // Use helper
-        if (!current_tag_name) continue;
-
-        gboolean already_active = FALSE;
-        for (GSList *active_iter = *active_inline_stack_ptr; active_iter != NULL; active_iter = active_iter->next) {
-            ActiveMarkdownInlineTag *active_md_tag = (ActiveMarkdownInlineTag *)active_iter->data;
-            if (g_strcmp0(active_md_tag->tag_name, current_tag_name) == 0) {
-                already_active = TRUE;
-                break;
-            }
-        }
-
-        if (!already_active) {
-            // This tag is new for this segment, open it
-            ActiveMarkdownInlineTag *new_active_tag = g_new0(ActiveMarkdownInlineTag, 1);
-            new_active_tag->tag_name = current_tag_name; // Points to the GtkTextTag's name (or our g_object_set_data copy)
-
-            if (g_strcmp0(current_tag_name, "bold") == 0) g_string_append(md_output, "**");
-            else if (g_strcmp0(current_tag_name, "italic") == 0) g_string_append(md_output, "*");
-            else if (g_strcmp0(current_tag_name, "code") == 0) g_string_append(md_output, "`");
-            else if (g_strcmp0(current_tag_name, "link") == 0) {
-                g_string_append(md_output, "["); // Link text will follow
-                // Fetch URL and title if stored on the GtkTextTag
-                // This assumes URL and title are stored as GObject data on the tag
-                const char *url = g_object_get_data(G_OBJECT(current_gtk_tag_obj), "url");
-                const char *title = g_object_get_data(G_OBJECT(current_gtk_tag_obj), "title");
-                new_active_tag->url = url ? g_strdup(url) : NULL;
-                new_active_tag->title = title ? g_strdup(title) : NULL;
-            }
-            // Images are more complex; alt text is part of the node, URL is an attribute.
-            // This simplified stack primarily handles emphasis, code, links.
-
-            *active_inline_stack_ptr = g_slist_prepend(*active_inline_stack_ptr, new_active_tag);
-        }
-    }
-}
 
 
 char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
