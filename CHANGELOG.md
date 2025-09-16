@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] - 2025-09-16
+
+### Fixed
+- Fixed "Don't Save" button causing infinite dialog loop by adding recursion prevention flags
+- Save button now saves directly to existing file path instead of always showing file dialog
+- Fixed dialog response handling to prevent window close request recursion
+- Enhanced dirty detection with debug output to identify content comparison issues
+- Improved parent window management for proper dialog cleanup
+
+## [0.3.12] - 2025-09-16
+
+### Fixed
+- Fixed "Don't Save" button not responding in unsaved changes dialog
+- Save button in unsaved changes dialog now shows file dialog for choosing save location
+- Autorecover functionality now properly called on application startup
+- Fixed dialog response handling and parent window management
+
+## [0.3.11] - 2025-09-15
+
+### Added
+- Unsaved changes dialog on exit: Prompts user to save, discard, or cancel when closing with unsaved changes
+- Better file content tracking for detecting modifications
+
+## [0.3.10] - 2025-09-15
+
+### Fixed
+- Fixed link cursor boundary detection with precise character rectangle checking to prevent cursor extending beyond link text
+
+## [0.3.9] - 2025-09-15
+
+### Fixed
+- Improved link cursor hit-testing accuracy using gtk_text_view_get_iter_at_position() with trailing character handling
+
+## [0.3.8] - 2025-09-15
+
+### Added
+- Link hover cursor: Cursor changes to pointer when hovering over clickable links in the text view
+
 ## [0.3.7] - 2025-09-15
 
 ### Fixed

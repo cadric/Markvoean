@@ -1,6 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Main application entry point and UI coordination for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
+   [0.3.11] - 2025-09-15 - main.c
+   Added: Unsaved changes dialog on exit with save/discard/cancel options and better dirty tracking
 */
 
 #ifdef HAVE_CONFIG_H
@@ -36,10 +38,19 @@ static const char *DATA_ORIGINAL_TEXT = "gtktext-original-md";
 
 /* Core handlers and callbacks */
 static gboolean reparse_markdown_cb(gpointer user_data);
-static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location, 
+static void on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *location,
                                   gchar *text, gint len, gpointer user_data);
 static void on_text_changed(GtkTextBuffer *buffer, gpointer user_data);
 static gboolean on_window_close_request(GtkWindow *window, gpointer user_data);
+
+/* Helper functions */
+static gboolean has_unsaved_changes(GtkTextBuffer *buffer);
+static void show_unsaved_changes_dialog(GtkWindow *parent, GtkTextBuffer *buffer);
+static void on_unsaved_changes_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data);
+static void on_file_save_finish(GObject *source_object, GAsyncResult *res, gpointer user_data);
+static void check_for_autorecover(GtkApplication *app);
+static void show_autorecover_dialog(GtkWindow *parent, const char *autosave_path);
+static void on_autorecover_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data);
 
 /* Action callbacks */
 static void action_open_cb(GSimpleAction *a, GVariant *p, gpointer user_data);
@@ -61,8 +72,10 @@ static gboolean on_text_view_query_tooltip(GtkWidget *widget, gint x, gint y,
                                           gpointer user_data);
 static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval, 
                               guint keycode, GdkModifierType state, gpointer user_data);
-static gboolean on_scroll_event(GtkEventControllerScroll *controller, gdouble dx, 
+static gboolean on_scroll_event(GtkEventControllerScroll *controller, gdouble dx,
                                gdouble dy, gpointer user_data);
+static void on_text_view_motion(GtkEventControllerMotion *controller, gdouble x,
+                               gdouble y, gpointer user_data);
 
 /* Dialog completion callbacks */
 static void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res, 
@@ -1670,6 +1683,54 @@ static void on_save_file_dialog_finish(GObject *source_object, GAsyncResult *res
     g_message("Document saved to: %s", path);
 }
 
+/* Async save-file completion callback for unsaved changes dialog */
+static void on_file_save_finish(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+    GtkFileDialog *dialog = GTK_FILE_DIALOG(source_object);
+    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
+    GError *error = NULL;
+
+    g_autoptr(GFile) file = gtk_file_dialog_save_finish(dialog, res, &error);
+    if (error) {
+        g_warning("Save dialog finished with error: %s", error->message);
+        g_clear_error(&error);
+        return;
+    }
+    if (!file) {
+        g_debug("Save dialog dismissed without selection");
+        return;
+    }
+
+    g_autofree char *path = g_file_get_path(file);
+
+    /* Save the buffer to the selected file */
+    save_buffer_to_file(buffer, path);
+
+    /* Update original text after save to prevent future dirty detection */
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    g_autofree gchar *current_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+    g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_text), g_free);
+
+    /* Check if we need to close the window after save */
+    gpointer close_after_save = g_object_get_data(G_OBJECT(buffer), "close-after-save");
+    if (close_after_save) {
+        /* Get the window from the buffer data if available */
+        GtkWidget *window = g_object_get_data(G_OBJECT(buffer), "parent-window");
+        if (window && GTK_IS_WINDOW(window)) {
+            /* Set flag to prevent dialog recursion and close */
+            g_object_set_data(G_OBJECT(window), "closing-without-dialog", GINT_TO_POINTER(1));
+            gtk_window_close(GTK_WINDOW(window));
+        }
+
+        /* Clean up the flags */
+        g_object_set_data(G_OBJECT(buffer), "close-after-save", NULL);
+        g_object_set_data(G_OBJECT(buffer), "parent-window", NULL);
+    }
+
+    g_message("Document saved to: %s", path);
+}
+
 static void action_save_as_cb(GSimpleAction *a, GVariant *p, gpointer user_data)
 {
     (void)a; (void)p;
@@ -1887,10 +1948,229 @@ static void on_text_changed(GtkTextBuffer *buffer, G_GNUC_UNUSED gpointer user_d
                                         g_object_ref(buffer), g_object_unref);
 }
 
-/* Callback triggered when the main window requests to be closed */
-static gboolean on_window_close_request(G_GNUC_UNUSED GtkWindow *window,
-                                       gpointer user_data)
+/* Check if buffer has unsaved changes by comparing current content with original */
+static gboolean has_unsaved_changes(GtkTextBuffer *buffer)
 {
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
+
+    /* Get current buffer content */
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    g_autofree gchar *current_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+
+    /* Get original text when file was loaded/saved */
+    const gchar *original_text = g_object_get_data(G_OBJECT(buffer), DATA_ORIGINAL_TEXT);
+    if (!original_text) {
+        original_text = ""; /* Empty for new documents */
+    }
+
+    /* Compare current text with original */
+    gboolean has_changes = g_strcmp0(current_text, original_text) != 0;
+
+    if (has_changes) {
+        g_debug("has_unsaved_changes: DIRTY - current length: %zu, original length: %zu",
+                strlen(current_text), strlen(original_text));
+        g_debug("has_unsaved_changes: Current text: '%.50s%s'",
+                current_text, strlen(current_text) > 50 ? "..." : "");
+        g_debug("has_unsaved_changes: Original text: '%.50s%s'",
+                original_text, strlen(original_text) > 50 ? "..." : "");
+    } else {
+        g_debug("has_unsaved_changes: CLEAN - no changes detected");
+    }
+
+    return has_changes;
+}
+
+/* Show dialog asking user to save unsaved changes */
+static void show_unsaved_changes_dialog(GtkWindow *parent, GtkTextBuffer *buffer)
+{
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+        _("Save changes before closing?"),
+        _("If you don't save, your changes will be permanently lost.")
+    ));
+
+    adw_alert_dialog_add_responses(dialog,
+        "discard", _("_Don't Save"),
+        "cancel", _("_Cancel"),
+        "save", _("_Save"),
+        NULL);
+
+    adw_alert_dialog_set_response_appearance(dialog, "discard", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_response_appearance(dialog, "save", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response(dialog, "save");
+    adw_alert_dialog_set_close_response(dialog, "cancel");
+
+    /* Store parent window in buffer data for later use */
+    g_object_set_data(G_OBJECT(buffer), "parent-window", parent);
+
+    g_signal_connect(dialog, "response", G_CALLBACK(on_unsaved_changes_dialog_response), buffer);
+
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(parent));
+}
+
+/* Handle unsaved changes dialog response */
+static void on_unsaved_changes_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+{
+    (void)dialog; /* Suppress unused parameter warning */
+    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
+    /* Get the parent window from buffer data */
+    GtkWidget *window = g_object_get_data(G_OBJECT(buffer), "parent-window");
+
+    g_message("Dialog response: %s", response);
+
+    if (g_strcmp0(response, "save") == 0) {
+        /* Check if there's already a file path - if so, save directly */
+        const char *current_file_path = g_object_get_data(G_OBJECT(window), "current_file_path");
+
+        if (current_file_path && *current_file_path) {
+            /* Save directly to existing file */
+            g_message("Saving to existing file: %s", current_file_path);
+            save_buffer_to_file(buffer, current_file_path);
+
+            /* Update original text after save */
+            GtkTextIter start, end;
+            gtk_text_buffer_get_bounds(buffer, &start, &end);
+            g_autofree gchar *current_text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+            g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_text), g_free);
+
+            /* Set flag to prevent recursion and close */
+            g_object_set_data(G_OBJECT(window), "closing-without-dialog", GINT_TO_POINTER(1));
+            gtk_window_close(GTK_WINDOW(window));
+        } else {
+            /* Show file dialog to choose save location */
+            GtkFileDialog *file_dialog = gtk_file_dialog_new();
+            gtk_file_dialog_set_title(file_dialog, _("Save File"));
+            gtk_file_dialog_set_modal(file_dialog, TRUE);
+
+            /* Set default name */
+            GFile *default_file = g_file_new_for_path("Untitled.md");
+            gtk_file_dialog_set_initial_file(file_dialog, default_file);
+            g_object_unref(default_file);
+
+            gtk_file_dialog_save(file_dialog, GTK_WINDOW(window), NULL,
+                                (GAsyncReadyCallback)on_file_save_finish, buffer);
+
+            g_object_set_data_full(G_OBJECT(buffer), "close-after-save", GINT_TO_POINTER(1), NULL);
+            g_object_unref(file_dialog);
+        }
+    } else if (g_strcmp0(response, "discard") == 0) {
+        /* Close without saving - set flag to prevent dialog recursion */
+        g_message("Discarding changes and closing");
+        if (window && GTK_IS_WINDOW(window)) {
+            g_object_set_data(G_OBJECT(window), "closing-without-dialog", GINT_TO_POINTER(1));
+            gtk_window_close(GTK_WINDOW(window));
+        }
+    }
+    /* Cancel: do nothing, dialog closes automatically */
+}
+
+/* Check for autosave file and offer recovery on startup */
+static void check_for_autorecover(GtkApplication *app)
+{
+    const gchar *temp_dir = g_get_tmp_dir();
+    g_autofree gchar *autosave_path = g_build_filename(temp_dir, "gtktext-autosave.md", NULL);
+
+    /* Check if autosave file exists and is recent */
+    if (g_file_test(autosave_path, G_FILE_TEST_EXISTS)) {
+        GStatBuf stat_buf;
+        if (g_stat(autosave_path, &stat_buf) == 0) {
+            /* Check if autosave file is less than 24 hours old */
+            time_t now = time(NULL);
+            if (now - stat_buf.st_mtime < (24 * 60 * 60)) {
+                g_message("Found recent autosave file: %s", autosave_path);
+
+                /* Get main window to show dialog */
+                GtkWindow *parent = gtk_application_get_active_window(app);
+                if (parent) {
+                    show_autorecover_dialog(parent, autosave_path);
+                }
+            } else {
+                g_message("Autosave file is too old, removing: %s", autosave_path);
+                g_unlink(autosave_path);
+            }
+        }
+    }
+}
+
+/* Show dialog asking user to recover from autosave */
+static void show_autorecover_dialog(GtkWindow *parent, const char *autosave_path)
+{
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+        _("Recover unsaved changes?"),
+        _("The application was closed unexpectedly. Would you like to recover your unsaved work?")
+    ));
+
+    adw_alert_dialog_add_responses(dialog,
+        "discard", _("_Start Fresh"),
+        "recover", _("_Recover"),
+        NULL);
+
+    adw_alert_dialog_set_response_appearance(dialog, "discard", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_response_appearance(dialog, "recover", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response(dialog, "recover");
+    adw_alert_dialog_set_close_response(dialog, "discard");
+
+    g_signal_connect(dialog, "response", G_CALLBACK(on_autorecover_dialog_response), g_strdup(autosave_path));
+
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(parent));
+}
+
+/* Handle autorecover dialog response */
+static void on_autorecover_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+{
+    const char *autosave_path = (const char *)user_data;
+
+    if (g_strcmp0(response, "recover") == 0) {
+        /* Load autosave content */
+        g_autofree gchar *contents = NULL;
+        gsize length = 0;
+        g_autoptr(GError) error = NULL;
+
+        if (g_file_get_contents(autosave_path, &contents, &length, &error)) {
+            /* Get the application and text buffer */
+            GtkWidget *window = gtk_widget_get_ancestor(GTK_WIDGET(dialog), GTK_TYPE_WINDOW);
+            if (window) {
+                GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+                GtkWidget *text_view = g_object_get_data(G_OBJECT(app), "text_view");
+                if (text_view) {
+                    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+
+                    /* Load recovered content */
+                    gtk_text_buffer_set_text(buffer, contents, length);
+
+                    /* Set original text to empty so it's marked as dirty */
+                    g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(""), g_free);
+
+                    /* Switch to editor view */
+                    GtkWidget *main_stack = g_object_get_data(G_OBJECT(app), "main_stack");
+                    if (main_stack) {
+                        gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "editor");
+                    }
+
+                    g_message("Successfully recovered content from autosave");
+                }
+            }
+        } else {
+            g_warning("Failed to read autosave file: %s", error->message);
+        }
+    }
+
+    /* Remove autosave file after decision */
+    g_unlink(autosave_path);
+    g_free((gpointer)user_data); /* Free the duplicated autosave_path */
+}
+
+/* Callback triggered when the main window requests to be closed */
+static gboolean on_window_close_request(GtkWindow *window, gpointer user_data)
+{
+    /* Check if we're closing without dialog (to prevent recursion) */
+    gpointer closing_flag = g_object_get_data(G_OBJECT(window), "closing-without-dialog");
+    if (closing_flag) {
+        g_object_set_data(G_OBJECT(window), "closing-without-dialog", NULL);
+        g_message("Closing window without dialog (flag set)");
+        return FALSE; /* Allow close */
+    }
+
     /* Ensure text_view is valid before using it */
     if (!user_data || !GTK_IS_TEXT_VIEW(user_data)) {
         g_warning("on_window_close_request: Invalid text_view (user_data).");
@@ -1905,30 +2185,35 @@ static gboolean on_window_close_request(G_GNUC_UNUSED GtkWindow *window,
         return FALSE;
     }
 
-    g_debug("on_window_close_request: preparing to close");
-    
-    /* Attempt to disconnect the signal handler if it was connected */
+    g_debug("on_window_close_request: checking for unsaved changes");
+
+    /* Check if there are unsaved changes */
+    if (has_unsaved_changes(buffer)) {
+        g_message("Unsaved changes detected, showing save dialog");
+        show_unsaved_changes_dialog(window, buffer);
+        return TRUE; /* Prevent automatic close, let dialog handle it */
+    }
+
+    g_debug("on_window_close_request: no unsaved changes, proceeding with close");
+
+    /* Clean up if no unsaved changes */
     if (buffer_changed_signal_id > 0) {
         if (g_signal_handler_is_connected(buffer, buffer_changed_signal_id)) {
-            g_debug("on_window_close_request: disconnecting 'changed' signal handler (ID: %u)", 
+            g_debug("on_window_close_request: disconnecting 'changed' signal handler (ID: %u)",
                     buffer_changed_signal_id);
             g_signal_handler_disconnect(buffer, buffer_changed_signal_id);
         }
     }
     buffer_changed_signal_id = 0;
 
-    /* Cancel pending autosave and save immediately */
+    /* Cancel pending autosave */
     if (save_timeout_id != 0) {
         g_source_remove(save_timeout_id);
         save_timeout_id = 0;
     }
-    /* Save the buffer contents */
-    g_message("Saving buffer before closing...");
-    save_buffer_as_markdown(buffer);
-    g_message("Buffer saved. Allowing default close handling.");
-    
-    /* Return FALSE to let the default handler proceed with window destruction */
-    return FALSE;
+
+    g_message("Allowing default close handling");
+    return FALSE; /* Allow default close behavior */
 }
 
 /* Callback for keyboard shortcuts (Ctrl+C and zoom) */
@@ -1996,6 +2281,86 @@ static gboolean on_scroll_event(GtkEventControllerScroll *controller, gdouble dx
     }
     
     return FALSE;
+}
+
+static void on_text_view_motion(GtkEventControllerMotion *controller, gdouble x, gdouble y,
+                               gpointer user_data)
+{
+    (void)controller;
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    GtkTextIter iter;
+    gint trailing;
+
+    /* Use get_iter_at_position for more accurate hit testing */
+    if (!gtk_text_view_get_iter_at_position(text_view, &iter, &trailing, x, y)) {
+        /* Fallback to text cursor if position is outside text area */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(text_view), "text");
+        return;
+    }
+
+    /* More precise handling: check both current position AND trailing position */
+    gboolean has_link = FALSE;
+
+    /* First check the exact character at the position */
+    GSList *tags = gtk_text_iter_get_tags(&iter);
+    for (GSList *l = tags; l != NULL; l = l->next) {
+        GtkTextTag *tag = GTK_TEXT_TAG(l->data);
+        gchar *tag_name = NULL;
+        g_object_get(tag, "name", &tag_name, NULL);
+
+        if (tag_name && g_str_has_prefix(tag_name, "link_")) {
+            has_link = TRUE;
+            g_free(tag_name);
+            break;
+        }
+        g_free(tag_name);
+    }
+    g_slist_free(tags);
+
+    /* If no link found and we have trailing chars, check the trailing position too */
+    if (!has_link && trailing > 0) {
+        GtkTextIter trailing_iter = iter;
+        gtk_text_iter_forward_chars(&trailing_iter, trailing);
+
+        tags = gtk_text_iter_get_tags(&trailing_iter);
+        for (GSList *l = tags; l != NULL; l = l->next) {
+            GtkTextTag *tag = GTK_TEXT_TAG(l->data);
+            gchar *tag_name = NULL;
+            g_object_get(tag, "name", &tag_name, NULL);
+
+            if (tag_name && g_str_has_prefix(tag_name, "link_")) {
+                has_link = TRUE;
+                g_free(tag_name);
+                break;
+            }
+            g_free(tag_name);
+        }
+        g_slist_free(tags);
+    }
+
+    /* Additional boundary check: ensure we're actually within character bounds */
+    if (has_link) {
+        /* Get the character rectangle to ensure we're really over the character */
+        GdkRectangle char_rect;
+        gtk_text_view_get_iter_location(text_view, &iter, &char_rect);
+
+        /* Convert to widget coordinates */
+        gint wx, wy;
+        gtk_text_view_buffer_to_window_coords(text_view, GTK_TEXT_WINDOW_TEXT,
+                                             char_rect.x, char_rect.y, &wx, &wy);
+
+        /* Check if mouse is actually within reasonable bounds of the character */
+        if (x < wx - 2 || x > wx + char_rect.width + 2) {
+            has_link = FALSE;
+        }
+    }
+
+    /* Set cursor based on whether we're over a link */
+    if (has_link) {
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(text_view), "pointer");
+    } else {
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(text_view), "text");
+    }
 }
 
 static void on_map(G_GNUC_UNUSED GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
@@ -2187,6 +2552,11 @@ static void app_activate(GApplication *application)
     g_signal_connect(key_controller, "key-pressed", G_CALLBACK(on_key_pressed), text_view);
     gtk_widget_add_controller(text_view, key_controller);
 
+    /* Setup motion controller for link hover cursor */
+    GtkEventController *motion_controller = gtk_event_controller_motion_new();
+    g_signal_connect(motion_controller, "motion", G_CALLBACK(on_text_view_motion), text_view);
+    gtk_widget_add_controller(text_view, motion_controller);
+
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
 
     /* Initialize GSettings and load autosave delay */
@@ -2274,6 +2644,9 @@ static void app_activate(GApplication *application)
 
     /* Connect window map signal to set welcome screen after proper initialization */
     g_signal_connect(window, "map", G_CALLBACK(on_window_map), NULL);
+
+    /* Check for autorecover on startup */
+    check_for_autorecover(app);
 
     gtk_window_present(GTK_WINDOW(window));
 }

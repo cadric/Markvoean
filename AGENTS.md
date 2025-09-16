@@ -1,5 +1,3 @@
-# GNOME C/GTK4 App Guidelines — Slim v1
-
 ## 📋 PRE‑EDIT CHECKLIST
 
 **Mandatory before any change**
