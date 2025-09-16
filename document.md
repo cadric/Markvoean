@@ -50,7 +50,7 @@ test.. test… test….. test?….. test!….
 ## Blockquotes
 
 
->                                           Blockquotes can also be nested…
+>                                                                                     Blockquotes can also be nested…
 >       …by using additional greater-than signs right next to each other…
 >       …or with spaces between arrows.
 
@@ -159,9 +159,9 @@ The killer feature of `markdown-it` is very effective support of
 
 ### [Emojies](https://github.com/markdown-it/markdown-it-emoji)
 
->                                           Classic markup: :wink: :cry: :laughing: :yum:
+>                                                                                     Classic markup: :wink: :cry: :laughing: :yum:
 
->                                           Shortcuts (emoticons): :-) :-( 8-) ;)
+>                                                                                     Shortcuts (emoticons): :-) :-( 8-) ;)
 
 see [how to change output](https://github.com/markdown-it/markdown-it-emoji#change-output) with twemoji.
 

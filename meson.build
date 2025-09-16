@@ -2,7 +2,7 @@
 # Added: UI compliance, accessibility, i18n, and GObject types
 
 project('gtktext', 'c',
-  version: '0.3.13',
+  version: '0.3.14',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

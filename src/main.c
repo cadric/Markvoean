@@ -528,6 +528,12 @@ static void save_buffer_as_markdown(GtkTextBuffer *buffer)
         }
     } else {
         g_print("Buffer saved as markdown to: %s\n", filename);
+
+        /* Update original text to current content since we just saved */
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(buffer, &start, &end);
+        g_autofree gchar *current_content = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+        g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_content), g_free);
     }
 }
 
@@ -568,6 +574,12 @@ static void save_buffer_to_file(GtkTextBuffer *buffer, const char *filepath)
         g_message("Buffer saved as markdown to: %s", filepath);
         /* Reset dirty flag since we've saved */
         g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
+
+        /* Update original text to current content since we just saved */
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(buffer, &start, &end);
+        g_autofree gchar *current_content = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+        g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(current_content), g_free);
     }
 }
 
@@ -1965,20 +1977,7 @@ static gboolean has_unsaved_changes(GtkTextBuffer *buffer)
     }
 
     /* Compare current text with original */
-    gboolean has_changes = g_strcmp0(current_text, original_text) != 0;
-
-    if (has_changes) {
-        g_debug("has_unsaved_changes: DIRTY - current length: %zu, original length: %zu",
-                strlen(current_text), strlen(original_text));
-        g_debug("has_unsaved_changes: Current text: '%.50s%s'",
-                current_text, strlen(current_text) > 50 ? "..." : "");
-        g_debug("has_unsaved_changes: Original text: '%.50s%s'",
-                original_text, strlen(original_text) > 50 ? "..." : "");
-    } else {
-        g_debug("has_unsaved_changes: CLEAN - no changes detected");
-    }
-
-    return has_changes;
+    return g_strcmp0(current_text, original_text) != 0;
 }
 
 /* Show dialog asking user to save unsaved changes */

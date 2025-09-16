@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.14] - 2025-09-16
+
+### Fixed
+- Fixed false positive unsaved changes detection after auto-save by updating DATA_ORIGINAL_TEXT in both save functions
+- Auto-save operations now properly update the baseline content for dirty detection
+- Eliminated unnecessary unsaved changes dialogs when opening and immediately closing documents
+
 ## [0.3.13] - 2025-09-16
 
 ### Fixed
