@@ -7,7 +7,17 @@
  */
 #include "config.h"
 #include <gtktext/document/document.h>
+#include <gtktext/document/document_manager.h>
+#include <gtktext/render/cmrender.h>
+#include <gtktext/ui/welcome_screen.h>
+#include <gtktext/core/settings.h>
 #include <glib-object.h>
+#include <gtk/gtk.h>
+#include <gio/gio.h>
+#include <glib/gi18n.h>
+#ifdef HAVE_LIBSOUP
+#include <libsoup/soup.h>
+#endif
 
 /* ========== META ========== */
 /* [0.2.0] - 2025-09-15 - src/document.c
@@ -192,4 +202,96 @@ void gtktext_document_set_modified(GtktextDocument *document, gboolean modified)
 gboolean gtktext_document_get_modified(GtktextDocument *document) {
     g_return_val_if_fail(GTKTEXT_IS_DOCUMENT(document), FALSE);
     return document->modified;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * DOCUMENT EVENT HANDLERS - File dialog callbacks and document operations
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Buffer data keys - local definitions */
+static const char *DATA_USER_DIRTY = "gtktext-user-dirty";
+static const char *DATA_ORIGINAL_TEXT = "gtktext-original-md";
+static const char *DATA_SUPPRESS_PARSE = "gtktext-suppress-reparse";
+
+void document_handlers_on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res,
+                                                  gpointer user_data)
+{
+    GtkFileDialog *d = GTK_FILE_DIALOG(source_object);
+    GError *finish_error = NULL;
+    g_autoptr(GFile) file = gtk_file_dialog_open_finish(d, res, &finish_error);
+    if (finish_error) {
+        g_warning("File dialog finished with error: %s", finish_error->message);
+        g_clear_error(&finish_error);
+        return;
+    }
+    if (!file) {
+        g_debug("File dialog dismissed without selection");
+        return;
+    }
+    g_autofree char *path = g_file_get_path(file);
+    g_debug("File selected: %s", path ? path : "(null)");
+
+    /* Persist the directory for future opens */
+    if (path) {
+        g_autofree char *dir = g_path_get_dirname(path);
+        if (dir) {
+            GSettings *app_settings = gtktext_get_app_settings();
+            if (app_settings) {
+                g_settings_set_string(app_settings, "last-open-dir", dir);
+            }
+            g_debug("[file-dialog] saved last-open-dir=%s", dir);
+        }
+    }
+
+    /* Load file content */
+    g_autofree char *contents = NULL;
+    gsize len = 0;
+    GError *err = NULL;
+    if (!g_file_get_contents(path, &contents, &len, &err)) {
+        g_warning("Open failed: %s", err->message);
+        g_clear_error(&err);
+        return;
+    }
+
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
+    if (!dm) {
+        g_warning("DocumentManager not found in application data");
+        return;
+    }
+
+    GtkWidget *text_view = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "text_view"));
+    GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(app), "main_stack"));
+    if (!text_view || !main_stack) return;
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+
+    /* Open file through DocumentManager */
+    GError *open_error = NULL;
+    if (!document_manager_open_file(dm, path, &open_error)) {
+        g_warning("Failed to open file: %s", open_error ? open_error->message : "Unknown error");
+        g_clear_error(&open_error);
+        return;
+    }
+
+    /* Preserve original text and reset dirty flag (for compatibility) */
+    g_object_set_data_full(G_OBJECT(buffer), DATA_ORIGINAL_TEXT, g_strdup(contents), g_free);
+    g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(0));
+
+#ifdef HAVE_LIBSOUP
+    SoupSession *soup_session = g_object_get_data(G_OBJECT(app), "soup_session");
+    /* Suppress dirty marking while we render programmatically */
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(1));
+    if (!cm_render_markdown_to_buffer(buffer, contents, GTK_TEXT_VIEW(text_view),
+                                      soup_session)) {
+#else
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(1));
+    if (!cm_render_markdown_to_buffer(buffer, contents, GTK_TEXT_VIEW(text_view), NULL)) {
+#endif
+        g_warning("Import failed");
+    } else {
+        cm_render_update_theme_dependent_tags(buffer);
+        /* Switch to editor view after successful file load */
+        welcome_screen_hide(app);
+    }
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(0));
 }

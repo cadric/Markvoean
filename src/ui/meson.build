@@ -34,19 +34,11 @@ ui_sources += files(
   'status_manager.c'
 )
 
-# Add window modules (will be created)
-# ui_sources += files(
-#   'window/main_window.c',
-#   'window/welcome_screen.c',
-#   'window/status_bar.c'
-# )
+# Add event handlers module
+ui_sources += files(
+  'event_handlers.c'
+)
 
-# Add editor modules (will be created)
-# ui_sources += files(
-#   'editor/text_view.c',
-#   'editor/text_events.c',
-#   'editor/overlays.c'
-# )
 
 # Export sources for parent build
 ui_lib_sources = ui_sources

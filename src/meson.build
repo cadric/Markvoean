@@ -2,7 +2,6 @@
 # Changed: Restructured to use modular organization with subprojects
 
 # Include subdirectories
-subdir('app')
 subdir('ui')
 subdir('document')
 subdir('render')
@@ -12,7 +11,7 @@ subdir('editor')
 
 # Collect all sources from modules
 sources = [
-  'main.c'  # Temporary - will be moved to app/
+  'main.c'  # Main application coordination layer
 ]
 
 # Add sources from each module

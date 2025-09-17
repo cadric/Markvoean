@@ -14,6 +14,8 @@
 #include <adwaita.h>
 #include <gtktext/core/window_lifecycle.h>
 #include <gtktext/core/settings_manager.h>
+#include <gtktext/core/app_initialization.h>
+#include <gtktext/core/signal_manager.h>
 #include <gtktext/document/document_manager.h>
 #include <gtktext/ui/welcome_screen.h>
 #include <gtktext/ui/dialogs.h>
@@ -22,9 +24,6 @@
 #ifdef HAVE_LIBSOUP
 #include <libsoup/soup.h>
 #endif
-
-/* External state that needs to be accessible */
-extern guint buffer_changed_signal_id;
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * PUBLIC API - Window and application lifecycle functions
@@ -62,15 +61,12 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
 
     g_debug("window_lifecycle_on_window_close_request: no unsaved changes, proceeding with close");
 
-    /* Clean up if no unsaved changes */
-    if (buffer_changed_signal_id > 0) {
-        if (g_signal_handler_is_connected(buffer, buffer_changed_signal_id)) {
-            g_debug("window_lifecycle_on_window_close_request: disconnecting 'changed' signal handler (ID: %u)",
-                    buffer_changed_signal_id);
-            g_signal_handler_disconnect(buffer, buffer_changed_signal_id);
-        }
+    /* Clean up signal connections through proper signal manager */
+    SignalManager *sm = gtktext_get_signal_manager();
+    if (sm) {
+        g_debug("window_lifecycle_on_window_close_request: disconnecting buffer signals");
+        signal_manager_disconnect_buffer_changed(sm, buffer);
     }
-    buffer_changed_signal_id = 0;
 
     return FALSE; /* Allow close */
 }
@@ -102,15 +98,13 @@ void window_lifecycle_on_window_map(GtkWidget *window, gpointer user_data)
 
 void window_lifecycle_app_activate(GApplication *application)
 {
-    /* Call the core implementation in main.c until fully extracted */
-    extern void core_app_activate(GApplication *application);
-    core_app_activate(application);
+    /* Delegate to the specialized application initialization module */
+    app_initialization_activate(application);
 }
 
 void window_lifecycle_app_open(GApplication *application, GFile **files, gint n_files,
                               const gchar *hint)
 {
-    /* Call the core implementation in main.c until fully extracted */
-    extern void core_app_open(GApplication *application, GFile **files, gint n_files, const gchar *hint);
-    core_app_open(application, files, n_files, hint);
+    /* Delegate to the specialized application initialization module */
+    app_initialization_open(application, files, n_files, hint);
 }

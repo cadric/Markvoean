@@ -13,15 +13,45 @@
 #include <glib/gi18n.h>
 #include <gtktext/ui/welcome_screen.h>
 #include <gtktext/ui/file_actions.h>
+#include <gtktext/document/document.h>
+#include <gtktext/core/settings.h>
 
-/* Forward declarations for functions from main.c that we need access to */
-extern void debug_dump_window_env(GtkWindow *parent, const char *phase);
-extern void on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res, gpointer user_data);
-extern GSettings *app_settings;
+/* Buffer data keys - local definitions */
+static const char *DATA_ORIGINAL_TEXT = "gtktext-original-md";
+static const char *DATA_USER_DIRTY = "gtktext-user-dirty";
 
-/* Buffer data keys from main.c */
-extern const char *DATA_ORIGINAL_TEXT;
-extern const char *DATA_USER_DIRTY;
+/* Debug helper: window/display/environment info for diagnosing dialog layout issues */
+static void debug_dump_window_env(GtkWindow *parent, const char *phase)
+{
+    const char *dbg = g_getenv("G_MESSAGES_DEBUG");
+    if (!dbg || !*dbg) return;
+
+    if (!parent) {
+        g_debug("[file-dialog:%s] parent=(null)", phase);
+        return;
+    }
+
+    GtkWidget *pw = GTK_WIDGET(parent);
+    GdkDisplay *display = gtk_widget_get_display(pw);
+    const char *display_name = display ? gdk_display_get_name(display) : "(null)";
+    int scale = gtk_widget_get_scale_factor(pw);
+    GtkNative *native = gtk_widget_get_native(pw);
+    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
+    int sw = surface ? gdk_surface_get_width(surface) : -1;
+    int sh = surface ? gdk_surface_get_height(surface) : -1;
+    gboolean mapped = gtk_widget_get_mapped(pw);
+    gboolean visible = gtk_widget_get_visible(pw);
+
+    g_debug("[file-dialog:%s] display='%s' scale=%d surface=%dx%d mapped=%d visible=%d",
+            phase, display_name, scale, sw, sh, mapped, visible);
+
+    const char *backend_env = g_getenv("GDK_BACKEND");
+    const char *portal_env = g_getenv("GTK_USE_PORTAL");
+    g_debug("[file-dialog:%s] env GDK_BACKEND=%s GTK_USE_PORTAL=%s",
+            phase,
+            backend_env ? backend_env : "(unset)",
+            portal_env ? portal_env : "(unset)");
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * PUBLIC API - Welcome screen callback functions
@@ -45,6 +75,7 @@ void welcome_screen_open_cb(GtkButton *button, gpointer user_data)
 
     /* Prefer the last used folder, falling back to HOME */
     const char *initial_path = NULL;
+    GSettings *app_settings = gtktext_get_app_settings();
     if (app_settings) {
         const char *cfg = g_settings_get_string(app_settings, "last-open-dir");
         if (cfg && *cfg && g_file_test(cfg, G_FILE_TEST_IS_DIR)) initial_path = cfg;
@@ -63,7 +94,7 @@ void welcome_screen_open_cb(GtkButton *button, gpointer user_data)
     file_action_setup_open_dialog_filters(dlg);
 
     g_debug("[file-dialog] presenting open dialog (welcome)");
-    gtk_file_dialog_open(dlg, parent, NULL, on_open_file_dialog_finish, app);
+    gtk_file_dialog_open(dlg, parent, NULL, document_handlers_on_open_file_dialog_finish, app);
     g_object_unref(dlg);
     debug_dump_window_env(parent, "welcome-open:after");
 }

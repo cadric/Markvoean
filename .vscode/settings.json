@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "config.h": "c"
+        "config.h": "c",
+        "window_lifecycle.h": "c",
+        "settings_manager.h": "c",
+        "gio.h": "c"
     }
 }

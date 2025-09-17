@@ -7,6 +7,7 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 #include <gtktext/core/settings.h>
+#include <gtktext/core/settings_manager.h>
 
 /* ========== META ========== */
 /* [1.0.1] - 2025-09-16 - src/settings.c
@@ -139,15 +140,10 @@ AdwDialog* create_settings_window(GtkWindow *parent) {
  * PUBLIC API - Settings access functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-static GSettings *global_app_settings = NULL;
-
 /**
- * Get the application settings instance
+ * Get the application settings instance - delegates to settings_manager
  */
 GSettings* gtktext_get_app_settings(void)
 {
-    if (!global_app_settings) {
-        global_app_settings = g_settings_new("org.gtk.gtktext");
-    }
-    return global_app_settings;
+    return settings_manager_initialize_app_settings();
 }

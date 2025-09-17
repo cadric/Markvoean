@@ -77,12 +77,23 @@ void gtktext_document_set_modified(GtktextDocument *document, gboolean modified)
 /**
  * gtktext_document_get_modified:
  * @document: a #GtktextDocument
- * 
+ *
  * Gets the modified state of the document.
- * 
+ *
  * Returns: %TRUE if the document is modified, %FALSE otherwise
  */
 gboolean gtktext_document_get_modified(GtktextDocument *document);
+
+/**
+ * document_handlers_on_open_file_dialog_finish:
+ * @source_object: the GtkFileDialog
+ * @res: the async result
+ * @user_data: application data
+ *
+ * Handles completion of file open dialog and loads the selected file.
+ */
+void document_handlers_on_open_file_dialog_finish(GObject *source_object, GAsyncResult *res,
+                                                  gpointer user_data);
 
 G_END_DECLS
 

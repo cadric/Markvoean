@@ -8,7 +8,9 @@ core_sources += files(
   'settings.c',
   'util.c',
   'settings_manager.c',
-  'window_lifecycle.c'
+  'window_lifecycle.c',
+  'app_initialization.c',
+  'signal_manager.c'
 )
 
 # Export sources for parent build
