@@ -1,6 +1,7 @@
 /* Tab Manager Header
  * Purpose: Multi-document tab management for GTK markdown editor
- * [1.0.1] - 2025-09-17 - ui/tab_manager.h
+ * [1.0.1] - 2025-09-18 - ui/tab_manager.h
+ * FIXED: Complete API redesign with opaque types, all public functions declared
  */
 
 #ifndef GTKTEXT_TAB_MANAGER_H

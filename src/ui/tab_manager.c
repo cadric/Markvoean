@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Multi-document tab management for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.0] - 2025-09-17 - ui/tab_manager.c
-   Created: Implementation of tabbed document interface following GNOME HIG
+   [1.0.1] - 2025-09-18 - ui/tab_manager.c
+   FIXED: UnsavedChangesContext memory leak on early return (tab_manager.c:304)
 */
 
 #ifdef HAVE_CONFIG_H
