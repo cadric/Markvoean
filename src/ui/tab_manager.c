@@ -301,6 +301,7 @@ static void on_unsaved_changes_dialog_response(AdwAlertDialog *dialog G_GNUC_UNU
             if (!parent) {
                 g_warning("Could not find parent window for save-as dialog");
                 safe_close_page_finish(context->tab_view, context->page, FALSE);
+                g_free(context); /* avoid leak on early return */
                 return;
             }
 
