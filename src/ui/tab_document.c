@@ -13,12 +13,53 @@
 #include <glib/gi18n.h>
 #include <gtktext/ui/tab_document.h>
 #include <gtktext/render/cmrender.h>
+#include <gtktext/document/document.h>
 #include <gtktext/document/document_manager.h>
 #include <gtktext/editor/buffer_manager.h>
 #include <gtktext/ui/tab_manager.h>
 #include <gtktext/ui/file_actions.h>
 #include <gtktext/ui/status_manager.h>
 #include <gtktext/ui/event_handlers.h>
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * TYPES - Internal type definitions
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+struct _TabDocument {
+    /* Document model and management */
+    GtktextDocument *document;          /* Document model (GObject) */
+    DocumentManager *doc_manager;       /* Document operations */
+
+    /* UI components */
+    GtkWidget *text_view;              /* Editor widget */
+    GtkWidget *container;             /* Container widget for tab content */
+    GtkTextBuffer *buffer;            /* Text buffer */
+    GtkWidget *stack;                 /* Stack container (was misleadingly named scrolled_window) */
+
+    /* Tab metadata */
+    gchar *file_path;                 /* Full file path */
+    gchar *tab_title;                 /* Display title */
+    gboolean is_dirty;                /* Unsaved changes */
+    gboolean is_welcome;              /* Is this the welcome tab */
+    gboolean being_destroyed;         /* Destruction in progress flag */
+
+    /* Source view state - each tab tracks its own view mode */
+    gboolean is_source_mode;          /* TRUE = source view, FALSE = WYSIWYG */
+    GtkWidget *source_text_view;      /* Source view widget (when active) */
+    GtkTextBuffer *source_buffer;     /* Source buffer (when active) */
+    GtkWidget *original_text_view;    /* Original WYSIWYG text view */
+
+    /* Signal handlers */
+    gulong buffer_changed_handler_id;
+    gulong source_buffer_changed_handler_id;
+
+    /* State change callbacks */
+    TabDocumentDirtyStateCallback dirty_state_callback;
+    gpointer dirty_state_callback_data;
+
+    /* Markdown rendering state */
+    gchar *pending_markdown_content;  /* Content waiting for deferred rendering */
+};
 
 /* Forward declarations for welcome button callbacks */
 static void on_welcome_new_clicked(GtkButton *button, gpointer user_data);
@@ -32,12 +73,12 @@ static void on_welcome_open_clicked(GtkButton *button, gpointer user_data);
 static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td);
 static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td);
 
-/* Callback for when text view is realized and ready for rendering */
-static void on_text_view_realized(GtkWidget *text_view, gpointer user_data)
+/* Callback for when text view is mapped and ready for rendering */
+static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
 {
     TabDocument *td = (TabDocument *)user_data;
 
-    g_debug("Text view realized, applying deferred markdown rendering");
+    g_debug("Text view mapped, applying deferred markdown rendering");
 
     if (td && td->pending_markdown_content) {
         /* Block buffer change signals during deferred rendering */
@@ -69,7 +110,7 @@ static void on_text_view_realized(GtkWidget *text_view, gpointer user_data)
         td->pending_markdown_content = NULL;
 
         /* Disconnect this one-time callback */
-        g_signal_handlers_disconnect_by_func(text_view, on_text_view_realized, td);
+        g_signal_handlers_disconnect_by_func(text_view, on_text_view_mapped, td);
 
         /* Now that rendering is complete, set the document as clean and trigger status update */
         tab_document_set_modified(td, FALSE);
@@ -177,7 +218,7 @@ static GtkWidget *create_text_editor_widget(TabDocument *td)
     gtk_stack_set_visible_child_name(GTK_STACK(stack), "wysiwyg");
 
     /* Store the stack reference in TabDocument */
-    td->scrolled_window = stack;  /* Repurpose this field to store the stack */
+    td->stack = stack;
     td->original_text_view = wysiwyg_scrolled;  /* Store WYSIWYG scrolled window */
 
     return stack;
@@ -216,7 +257,7 @@ TabDocument *tab_document_new(void)
     /* Initialize source view state */
     td->is_source_mode = FALSE;
     /* source_text_view and source_buffer are now initialized in create_text_editor_widget */
-    /* scrolled_window and original_text_view are repurposed to store stack and WYSIWYG container */
+    /* stack stores the GtkStack container, original_text_view stores WYSIWYG scrolled window */
 
     /* Phase 3: Initialize callback */
     td->dirty_state_callback = NULL;
@@ -379,7 +420,7 @@ TabDocument *tab_document_new_welcome(void)
     td->is_source_mode = FALSE;
     td->source_text_view = NULL;
     td->source_buffer = NULL;
-    td->scrolled_window = NULL;
+    td->stack = NULL;
     td->original_text_view = NULL;
 
     /* Phase 3: Initialize callback */
@@ -452,7 +493,7 @@ void tab_document_destroy(TabDocument *td)
     /* Step 6: Clear all pointers to prevent accidental access */
     td->buffer = NULL;
     td->text_view = NULL;
-    td->scrolled_window = NULL;
+    td->stack = NULL;
     td->source_text_view = NULL;
 
     /* Step 7: Free strings */
@@ -501,10 +542,10 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
         cm_render_markdown_to_buffer(td->buffer, contents,
                                     GTK_TEXT_VIEW(td->text_view), NULL);
 
-        /* Set up callback for when text view becomes realized */
-        if (!gtk_widget_get_realized(GTK_WIDGET(td->text_view))) {
-            g_signal_connect_after(td->text_view, "realize",
-                                  G_CALLBACK(on_text_view_realized), td);
+        /* Set up callback for when text view becomes mapped */
+        if (!gtk_widget_get_mapped(GTK_WIDGET(td->text_view))) {
+            g_signal_connect_after(td->text_view, "map",
+                                  G_CALLBACK(on_text_view_mapped), td);
         }
     }
 
@@ -518,7 +559,8 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
     td->file_path = g_strdup(file_path);
 
     g_free(td->tab_title);
-    td->tab_title = g_strdup(g_path_get_basename(file_path));
+    g_autofree char *basename = g_path_get_basename(file_path);
+    td->tab_title = g_steal_pointer(&basename);
 
     /* Update DocumentManager with file path */
     if (td->doc_manager) {
@@ -558,6 +600,7 @@ gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **e
     /* Use DocumentManager to handle the save operation */
     if (td->doc_manager) {
         /* DocumentManager handles the save operation and state management */
+        /* TODO: DocumentManager uses async API - need to refactor for proper error propagation */
         if (!document_manager_save_as(td->doc_manager, safe_file_path, NULL, NULL)) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "DocumentManager failed to save file: %s", safe_file_path);
@@ -581,7 +624,8 @@ gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **e
     td->file_path = g_strdup(safe_file_path);
 
     g_free(td->tab_title);
-    td->tab_title = g_strdup(g_path_get_basename(td->file_path));
+    g_autofree char *basename = g_path_get_basename(td->file_path);
+    td->tab_title = g_steal_pointer(&basename);
 
     /* Phase 3: Use set_modified to trigger callback */
     tab_document_set_modified(td, FALSE);
@@ -620,18 +664,20 @@ void tab_document_set_modified(TabDocument *td, gboolean modified)
 
     gboolean was_dirty = td->is_dirty;
 
-    /* Sync with DocumentManager if available, otherwise use requested state */
-    gboolean actual_dirty_state = modified;
+    /* Honor the caller's request */
+    td->is_dirty = !!modified;
+
+    /* Sync with DocumentManager if available */
     if (td->doc_manager) {
-        /* Always query DocumentManager for authoritative state */
-        actual_dirty_state = document_manager_has_unsaved_changes(td->doc_manager);
+        /* TODO: Need DocumentManager API to set dirty state - for now just query for consistency */
+        gboolean manager_state = document_manager_has_unsaved_changes(td->doc_manager);
+        g_debug("TabDocument dirty state set to %s, DocumentManager state: %s",
+                td->is_dirty ? "TRUE" : "FALSE", manager_state ? "TRUE" : "FALSE");
     }
 
-    td->is_dirty = actual_dirty_state;
-
-    /* Phase 3: Notify callback if dirty state changed */
-    if (was_dirty != actual_dirty_state && td->dirty_state_callback) {
-        td->dirty_state_callback(td, actual_dirty_state, td->dirty_state_callback_data);
+    /* Notify callback if dirty state changed */
+    if (was_dirty != td->is_dirty && td->dirty_state_callback) {
+        td->dirty_state_callback(td, td->is_dirty, td->dirty_state_callback_data);
     }
 }
 
@@ -678,7 +724,7 @@ gboolean tab_document_get_source_mode(TabDocument *td)
 
 void tab_document_set_source_mode_state(TabDocument *td, gboolean is_source_mode,
                                         GtkWidget *source_text_view, GtkTextBuffer *source_buffer,
-                                        GtkWidget *scrolled_window, GtkWidget *original_text_view)
+                                        GtkWidget *stack_container, GtkWidget *original_text_view)
 {
     g_return_if_fail(td != NULL);
 
@@ -694,7 +740,7 @@ void tab_document_set_source_mode_state(TabDocument *td, gboolean is_source_mode
         g_object_ref(source_buffer);
     }
 
-    td->scrolled_window = scrolled_window;
+    td->stack = stack_container;
 
     /* Store reference to original text view if switching to source mode */
     if (is_source_mode && original_text_view && GTK_IS_WIDGET(original_text_view) && G_IS_OBJECT(original_text_view)) {
@@ -727,7 +773,7 @@ void tab_document_clear_source_mode_state(TabDocument *td)
         g_object_unref(td->original_text_view);
     }
     td->original_text_view = NULL;
-    td->scrolled_window = NULL;
+    td->stack = NULL;
 
     g_debug("TabDocument source mode state cleared");
 }
@@ -740,14 +786,14 @@ gboolean tab_document_switch_to_source_view(TabDocument *td)
 {
     g_return_val_if_fail(td != NULL, FALSE);
     g_return_val_if_fail(!td->is_welcome, FALSE);
-    g_return_val_if_fail(td->scrolled_window != NULL, FALSE);
+    g_return_val_if_fail(td->stack != NULL, FALSE);
 
     if (td->is_source_mode) {
         return TRUE; /* Already in source mode */
     }
 
     /* Get stack container */
-    GtkStack *stack = GTK_STACK(td->scrolled_window);
+    GtkStack *stack = GTK_STACK(td->stack);
     if (!GTK_IS_STACK(stack)) {
         g_warning("Tab document container is not a stack");
         return FALSE;
@@ -778,14 +824,14 @@ gboolean tab_document_switch_to_wysiwyg_view(TabDocument *td)
 {
     g_return_val_if_fail(td != NULL, FALSE);
     g_return_val_if_fail(!td->is_welcome, FALSE);
-    g_return_val_if_fail(td->scrolled_window != NULL, FALSE);
+    g_return_val_if_fail(td->stack != NULL, FALSE);
 
     if (!td->is_source_mode) {
         return TRUE; /* Already in WYSIWYG mode */
     }
 
     /* Get stack container */
-    GtkStack *stack = GTK_STACK(td->scrolled_window);
+    GtkStack *stack = GTK_STACK(td->stack);
     if (!GTK_IS_STACK(stack)) {
         g_warning("Tab document container is not a stack");
         return FALSE;
@@ -982,4 +1028,20 @@ static void on_welcome_open_clicked(GtkButton *button, gpointer user_data)
     } else {
         g_warning("Could not find 'open' action");
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * INTERNAL ACCESSORS - Functions for accessing internal fields
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+gboolean tab_document_is_being_destroyed(TabDocument *td)
+{
+    g_return_val_if_fail(td != NULL, TRUE);
+    return td->being_destroyed;
+}
+
+DocumentManager *tab_document_get_document_manager(TabDocument *td)
+{
+    g_return_val_if_fail(td != NULL, NULL);
+    return td->doc_manager;
 }

@@ -260,7 +260,7 @@ static void on_tab_view_page_detached(AdwTabView *tab_view, AdwTabPage *page, gi
     TabDocument *tab_doc = g_hash_table_lookup(tm->priv->tab_documents, page);
     if (tab_doc) {
         /* Double-check that TabDocument is not already being destroyed */
-        if (tab_doc->being_destroyed) {
+        if (tab_document_is_being_destroyed(tab_doc)) {
             g_debug("TabDocument already being destroyed, removing from hash table only");
             g_hash_table_remove(tm->priv->tab_documents, page);
             return;
@@ -820,7 +820,7 @@ TabDocument *tab_manager_get_tab_document(TabManager *tm, AdwTabPage *page)
 DocumentManager *tab_manager_get_document_manager(TabManager *tm, AdwTabPage *page)
 {
     TabDocument *tab_doc = tab_manager_get_tab_document(tm, page);
-    return tab_doc ? tab_doc->doc_manager : NULL;
+    return tab_doc ? tab_document_get_document_manager(tab_doc) : NULL;
 }
 
 GtkWidget *tab_manager_get_text_view(TabManager *tm, AdwTabPage *page)
