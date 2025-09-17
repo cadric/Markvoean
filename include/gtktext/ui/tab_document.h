@@ -48,12 +48,27 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
 
 gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError **error);
 gboolean tab_document_save(TabDocument *td, GError **error);
+
+/* Note: Current save_as returns TRUE when async save *starts*, not when it completes */
+G_GNUC_DEPRECATED_FOR(tab_document_save_as_async)
 gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **error);
+
+/* Synchronous save - blocks until completion */
+gboolean tab_document_save_as_sync(TabDocument *td, const char *file_path, GError **error);
+
+/* Asynchronous save - proper async API */
+void tab_document_save_as_async(TabDocument *td,
+                                const char *file_path,
+                                GCancellable *cancellable,
+                                GAsyncReadyCallback callback,
+                                gpointer user_data);
+gboolean tab_document_save_as_finish(TabDocument *td, GAsyncResult *result, GError **error);
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * PROPERTIES - Access to document properties
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
+/* Note: Returned strings are owned by TabDocument and valid until the document is destroyed */
 const char *tab_document_get_display_title(TabDocument *td);
 const char *tab_document_get_file_path(TabDocument *td);
 gboolean tab_document_get_modified(TabDocument *td);
@@ -90,15 +105,15 @@ gboolean tab_document_switch_to_wysiwyg_view(TabDocument *td);
  * LEGACY API - Deprecated functions (will be removed in v2.0)
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-G_GNUC_DEPRECATED
+G_GNUC_DEPRECATED_FOR(tab_document_switch_to_source_view)
 gboolean tab_document_get_source_mode(TabDocument *td);
 
-G_GNUC_DEPRECATED
+G_GNUC_DEPRECATED_FOR(tab_document_switch_to_source_view)
 void tab_document_set_source_mode_state(TabDocument *td, gboolean is_source_mode,
                                         GtkWidget *source_text_view, GtkTextBuffer *source_buffer,
                                         GtkWidget *scrolled_window, GtkWidget *original_text_view);
 
-G_GNUC_DEPRECATED
+G_GNUC_DEPRECATED_FOR(tab_document_switch_to_wysiwyg_view)
 void tab_document_clear_source_mode_state(TabDocument *td);
 
 G_END_DECLS

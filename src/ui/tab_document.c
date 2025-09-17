@@ -48,6 +48,7 @@ struct _TabDocument {
     GtkWidget *source_text_view;      /* Source view widget (when active) */
     GtkTextBuffer *source_buffer;     /* Source buffer (when active) */
     GtkWidget *original_text_view;    /* Original WYSIWYG text view */
+    gboolean original_text_view_has_ref; /* TRUE if we took an explicit ref on original_text_view */
 
     /* Signal handlers */
     gulong buffer_changed_handler_id;
@@ -110,7 +111,7 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
         td->pending_markdown_content = NULL;
 
         /* Disconnect this one-time callback */
-        g_signal_handlers_disconnect_by_func(text_view, on_text_view_mapped, td);
+        g_signal_handlers_disconnect_by_func(text_view, G_CALLBACK(on_text_view_mapped), td);
 
         /* Now that rendering is complete, set the document as clean and trigger status update */
         tab_document_set_modified(td, FALSE);
@@ -256,6 +257,7 @@ TabDocument *tab_document_new(void)
 
     /* Initialize source view state */
     td->is_source_mode = FALSE;
+    td->original_text_view_has_ref = FALSE;
     /* source_text_view and source_buffer are now initialized in create_text_editor_widget */
     /* stack stores the GtkStack container, original_text_view stores WYSIWYG scrolled window */
 
@@ -445,6 +447,12 @@ void tab_document_destroy(TabDocument *td)
     g_debug("Starting TabDocument destruction");
 
     /* Step 1: Immediately disconnect all signals to prevent further callbacks */
+    /* CRITICAL: Disconnect deferred render handler to prevent UAF if widget maps later */
+    if (td->text_view && G_IS_OBJECT(td->text_view)) {
+        g_signal_handlers_disconnect_by_func(td->text_view, G_CALLBACK(on_text_view_mapped), td);
+        g_debug("Disconnected deferred render signal to prevent UAF");
+    }
+
     if (td->buffer_changed_handler_id > 0 && td->buffer && G_IS_OBJECT(td->buffer)) {
         if (g_signal_handler_is_connected(td->buffer, td->buffer_changed_handler_id)) {
             g_signal_handler_disconnect(td->buffer, td->buffer_changed_handler_id);
@@ -486,8 +494,15 @@ void tab_document_destroy(TabDocument *td)
         g_object_unref(td->source_buffer);
         td->source_buffer = NULL;
     }
-    /* CRITICAL FIX: Don't unref original_text_view - container owns it */
-    /* The widget hierarchy will be destroyed by GTK when tab is closed */
+
+    /*
+     * CRITICAL FIX: Only unref original_text_view if we actually took a ref.
+     * The flag tracks whether we have an explicit ref that needs cleanup.
+     */
+    if (td->original_text_view_has_ref && td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
+        g_debug("Unreffing original_text_view (explicit ref from source mode)");
+        g_object_unref(td->original_text_view);
+    }
     td->original_text_view = NULL;
 
     /* Step 6: Clear all pointers to prevent accidental access */
@@ -640,6 +655,41 @@ gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **e
     return TRUE;
 }
 
+gboolean tab_document_save_as_sync(TabDocument *td, const char *file_path, GError **error)
+{
+    g_return_val_if_fail(td != NULL, FALSE);
+    g_return_val_if_fail(file_path != NULL, FALSE);
+
+    /* TODO: Implement proper synchronous save that waits for DocumentManager async completion */
+    g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+               "Synchronous save not yet implemented - DocumentManager uses async API");
+    return FALSE;
+}
+
+void tab_document_save_as_async(TabDocument *td,
+                                const char *file_path,
+                                GCancellable *cancellable,
+                                GAsyncReadyCallback callback,
+                                gpointer user_data)
+{
+    g_return_if_fail(td != NULL);
+    g_return_if_fail(file_path != NULL);
+
+    /* TODO: Implement proper async save that integrates with DocumentManager callbacks */
+    GTask *task = g_task_new(td, cancellable, callback, user_data);
+    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                           "Async save not yet implemented - needs DocumentManager integration");
+    g_object_unref(task);
+}
+
+gboolean tab_document_save_as_finish(TabDocument *td, GAsyncResult *result, GError **error)
+{
+    g_return_val_if_fail(td != NULL, FALSE);
+    g_return_val_if_fail(G_IS_TASK(result), FALSE);
+
+    return g_task_propagate_boolean(G_TASK(result), error);
+}
+
 const char *tab_document_get_display_title(TabDocument *td)
 {
     g_return_val_if_fail(td != NULL, NULL);
@@ -745,11 +795,12 @@ void tab_document_set_source_mode_state(TabDocument *td, gboolean is_source_mode
     /* Store reference to original text view if switching to source mode */
     if (is_source_mode && original_text_view && GTK_IS_WIDGET(original_text_view) && G_IS_OBJECT(original_text_view)) {
         /* Clear any existing reference */
-        if (td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
+        if (td->original_text_view_has_ref && td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
             g_object_unref(td->original_text_view);
         }
         td->original_text_view = original_text_view;
         g_object_ref(original_text_view);  /* Keep reference */
+        td->original_text_view_has_ref = TRUE;
     }
 
     g_debug("TabDocument source mode set to: %s", is_source_mode ? "source" : "WYSIWYG");
@@ -758,6 +809,8 @@ void tab_document_set_source_mode_state(TabDocument *td, gboolean is_source_mode
 void tab_document_clear_source_mode_state(TabDocument *td)
 {
     g_return_if_fail(td != NULL);
+
+    /* We now use the explicit ref flag instead of mode state */
 
     td->is_source_mode = FALSE;
     td->source_text_view = NULL;
@@ -768,11 +821,12 @@ void tab_document_clear_source_mode_state(TabDocument *td)
     }
     td->source_buffer = NULL;
 
-    /* Clean up original text view reference */
-    if (td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
+    /* Clean up original text view reference (only if we took a ref) */
+    if (td->original_text_view_has_ref && td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
         g_object_unref(td->original_text_view);
     }
     td->original_text_view = NULL;
+    td->original_text_view_has_ref = FALSE;
     td->stack = NULL;
 
     g_debug("TabDocument source mode state cleared");
@@ -848,6 +902,14 @@ gboolean tab_document_switch_to_wysiwyg_view(TabDocument *td)
         g_signal_handler_disconnect(td->source_buffer, td->source_buffer_changed_handler_id);
         td->source_buffer_changed_handler_id = 0;
         g_debug("Disconnected source buffer change tracking");
+    }
+
+    /* Release explicit ref grabbed when entering source mode */
+    if (td->original_text_view_has_ref && td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
+        g_object_unref(td->original_text_view); /* prevent leak on mode toggle */
+        g_debug("Unreffed original_text_view on switch to WYSIWYG");
+        td->original_text_view_has_ref = FALSE;
+        td->original_text_view = NULL;
     }
 
     /* Switch to WYSIWYG view */
@@ -1036,7 +1098,7 @@ static void on_welcome_open_clicked(GtkButton *button, gpointer user_data)
 
 gboolean tab_document_is_being_destroyed(TabDocument *td)
 {
-    g_return_val_if_fail(td != NULL, TRUE);
+    g_return_val_if_fail(td != NULL, FALSE);
     return td->being_destroyed;
 }
 
