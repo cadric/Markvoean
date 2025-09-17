@@ -17,6 +17,7 @@
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/ui/file_actions.h>
 #include <gtktext/components/toolbar.h>
+#include <gtktext/ui/status_manager.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Private implementation details
@@ -114,9 +115,29 @@ static void on_tab_page_notify_selected(GObject *object, GParamSpec *pspec G_GNU
         if (text_view && GTK_IS_TEXT_VIEW(text_view)) {
             toolbar_update_text_view(text_view);
             g_debug("Updated toolbar for tab switch");
+
+            /* Update status bar to reflect current document state */
+            g_debug("About to get document manager for status bar update");
+            DocumentManager *doc_manager = tab_manager_get_document_manager(tm, page);
+            if (doc_manager) {
+                g_debug("Got document manager, getting state and file path");
+                DocumentState state = document_manager_get_state(doc_manager);
+                const char *file_path = document_manager_get_file_path(doc_manager);
+                g_debug("Calling status_manager_update_status_bar_for_state");
+                status_manager_update_status_bar_for_state(tm->priv->app, state, file_path);
+                g_debug("Updated status bar for tab switch: state=%d, file=%s",
+                       state, file_path ? file_path : "None");
+            } else {
+                g_debug("No document manager found for this tab");
+            }
         } else {
             /* Welcome tabs and some special tabs don't have text views - this is normal */
             g_debug("Tab does not have a text view (likely welcome tab): %s", adw_tab_page_get_title(page));
+            /* Clear status bar for welcome tab */
+            g_debug("Setting welcome tab status");
+            status_manager_update_save_status(tm->priv->app, "");
+            status_manager_update_file_location(tm->priv->app, _("Welcome"));
+            g_debug("Welcome tab status set");
         }
     }
 }
@@ -446,6 +467,17 @@ static void on_tab_document_dirty_state_changed(TabDocument *td, gboolean is_dir
             AdwTabPage *page = (AdwTabPage *)key;
             update_tab_title(tm, page);
             g_debug("Updated tab title due to dirty state change: %s", is_dirty ? "dirty" : "clean");
+
+            /* Update status bar if this is the currently selected tab */
+            AdwTabPage *selected_page = adw_tab_view_get_selected_page(tm->priv->tab_view);
+            if (page == selected_page) {
+                /* Use TabDocument's dirty state directly, not DocumentManager state */
+                const char *file_path = tab_document_get_file_path(td);
+                DocumentState state = is_dirty ? DOC_STATE_DIRTY : DOC_STATE_CLEAN;
+                status_manager_update_status_bar_for_state(tm->priv->app, state, file_path);
+                g_debug("Updated status bar due to dirty state change: state=%s, file=%s",
+                       is_dirty ? "DIRTY" : "CLEAN", file_path ? file_path : "None");
+            }
             return;
         }
     }
@@ -627,6 +659,15 @@ AdwTabPage *tab_manager_new_document(TabManager *tm, const char *title)
     /* Store document association */
     g_hash_table_insert(tm->priv->tab_documents, page, tab_doc);
 
+    /* Initialize DocumentManager for this document tab */
+    GList *windows = gtk_application_get_windows(tm->priv->app);
+    if (windows && windows->data) {
+        GtkWindow *main_window = GTK_WINDOW(windows->data);
+        tab_document_initialize_document_manager(tab_doc, main_window);
+    } else {
+        g_warning("Could not get main window for DocumentManager initialization");
+    }
+
     /* Phase 3: Set up dirty state callback */
     tab_document_set_dirty_state_callback(tab_doc, on_tab_document_dirty_state_changed, tm);
 
@@ -638,6 +679,43 @@ AdwTabPage *tab_manager_new_document(TabManager *tm, const char *title)
     adw_tab_view_set_selected_page(tm->priv->tab_view, page);
 
     g_debug("Created new document tab: %s", display_title);
+    return page;
+}
+
+AdwTabPage *tab_manager_new_welcome(TabManager *tm)
+{
+    g_return_val_if_fail(tm != NULL, NULL);
+    g_return_val_if_fail(tm->priv != NULL, NULL);
+    g_return_val_if_fail(tm->priv->initialized, NULL);
+
+    /* Create welcome tab document */
+    TabDocument *tab_doc = tab_document_new_welcome();
+    if (!tab_doc) {
+        g_warning("Failed to create welcome tab document");
+        return NULL;
+    }
+
+    /* Create tab page with welcome widget */
+    AdwTabPage *page = adw_tab_view_add_page(tm->priv->tab_view,
+                                            tab_document_get_widget(tab_doc), NULL);
+
+    /* Set tab properties */
+    adw_tab_page_set_title(page, _("Welcome"));
+    adw_tab_page_set_icon(page, g_themed_icon_new("application-x-generic-symbolic"));
+
+    /* Store document association */
+    g_hash_table_insert(tm->priv->tab_documents, page, tab_doc);
+
+    /* Welcome tabs don't need dirty state callbacks */
+
+    /* Connect selection signal */
+    g_signal_connect(page, "notify::selected",
+                    G_CALLBACK(on_tab_page_notify_selected), tm);
+
+    /* Select the welcome tab */
+    adw_tab_view_set_selected_page(tm->priv->tab_view, page);
+
+    g_debug("Created welcome tab");
     return page;
 }
 
@@ -686,6 +764,15 @@ AdwTabPage *tab_manager_open_file(TabManager *tm, const char *file_path)
 
     /* Store document association */
     g_hash_table_insert(tm->priv->tab_documents, page, tab_doc);
+
+    /* Initialize DocumentManager for this document tab */
+    GList *windows = gtk_application_get_windows(tm->priv->app);
+    if (windows && windows->data) {
+        GtkWindow *main_window = GTK_WINDOW(windows->data);
+        tab_document_initialize_document_manager(tab_doc, main_window);
+    } else {
+        g_warning("Could not get main window for DocumentManager initialization");
+    }
 
     /* Phase 3: Set up dirty state callback */
     tab_document_set_dirty_state_callback(tab_doc, on_tab_document_dirty_state_changed, tm);

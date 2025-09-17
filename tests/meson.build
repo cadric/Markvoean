@@ -22,7 +22,6 @@ lib_sources = [
   '../src/ui/actions/app_actions.c',
   '../src/ui/dialogs/dialogs.c',
   '../src/ui/image_embedder.c',
-  '../src/ui/welcome_screen.c'
 ]
 
 # Build a static library for testing (excludes main.c)

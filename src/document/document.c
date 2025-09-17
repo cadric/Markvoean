@@ -9,7 +9,6 @@
 #include <gtktext/document/document.h>
 #include <gtktext/document/document_manager.h>
 #include <gtktext/render/cmrender.h>
-#include <gtktext/ui/welcome_screen.h>
 #include <gtktext/core/settings.h>
 #include <glib-object.h>
 #include <gtk/gtk.h>
@@ -290,8 +289,7 @@ void document_handlers_on_open_file_dialog_finish(GObject *source_object, GAsync
         g_warning("Import failed");
     } else {
         cm_render_update_theme_dependent_tags(buffer);
-        /* Switch to editor view after successful file load */
-        welcome_screen_hide(app);
+        /* File content handled by tab system now */
     }
     g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(0));
 }

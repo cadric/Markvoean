@@ -310,6 +310,13 @@ void file_action_on_save_as_dialog_finish_tab(GObject *source_object, GAsyncResu
     g_autofree char *path = g_file_get_path(file);
     g_debug("Save file selected: %s", path ? path : "(null)");
 
+    /* Validate path before proceeding */
+    if (!path || !*path) {
+        g_warning("Invalid file path from dialog");
+        g_free(context);
+        return;
+    }
+
     /* Get active tab document */
     TabDocument *active_tab = tab_manager_get_active_document(context->tm);
     if (!active_tab) {

@@ -30,7 +30,6 @@
 #include <gtktext/ui/app_actions.h>
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/ui/image_embedder.h>
-#include <gtktext/ui/welcome_screen.h>
 #include <gtktext/ui/text_view_interactions.h>
 #include <gtktext/ui/status_manager.h>
 #include <gtktext/ui/event_handlers.h>

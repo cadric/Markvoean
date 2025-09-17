@@ -17,7 +17,6 @@
 #include <gtktext/core/app_initialization.h>
 #include <gtktext/core/signal_manager.h>
 #include <gtktext/document/document_manager.h>
-#include <gtktext/ui/welcome_screen.h>
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/editor/buffer_manager.h>
 
@@ -89,11 +88,7 @@ void window_lifecycle_on_window_map(GtkWidget *window, gpointer user_data)
         return;
     }
 
-    /* Check if a file was specified and buffer has content */
-    GtkWidget *main_stack = GTK_WIDGET(g_object_get_data(G_OBJECT(window), "main_stack"));
-    if (main_stack) {
-        welcome_screen_show(app);
-    }
+    /* Welcome screen now handled by tab system */
 }
 
 void window_lifecycle_app_activate(GApplication *application)

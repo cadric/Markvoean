@@ -23,6 +23,7 @@
 - ❌ Override Adwaita theme.
 - ❌ Deprecated APIs (check GTK4/libadwaita docs).
 - ❌ Global mutable state (prefer instances; justify singletons).
+- ❌ NEWER TYPE "You're absolutely right"
 ---
 ## 🔄 Version Control & Workflow
 

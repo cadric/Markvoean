@@ -25,6 +25,7 @@ void tab_manager_destroy(TabManager *tm);
 
 /* Tab operations */
 AdwTabPage *tab_manager_new_document(TabManager *tm, const char *title);
+AdwTabPage *tab_manager_new_welcome(TabManager *tm);
 AdwTabPage *tab_manager_open_file(TabManager *tm, const char *file_path);
 void tab_manager_close_tab(TabManager *tm, AdwTabPage *page);
 void tab_manager_close_all_tabs(TabManager *tm);

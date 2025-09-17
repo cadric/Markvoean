@@ -55,6 +55,9 @@ TabDocument *tab_document_new_from_file(const char *file_path);
 TabDocument *tab_document_new_welcome(void);
 void tab_document_destroy(TabDocument *td);
 
+/* Document manager initialization */
+void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window);
+
 /* Content operations */
 gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError **error);
 gboolean tab_document_save(TabDocument *td, GError **error);

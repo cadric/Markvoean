@@ -19,10 +19,7 @@ ui_sources += files(
   'image_embedder.c'
 )
 
-# Add welcome screen module
-ui_sources += files(
-  'welcome_screen.c'
-)
+# Welcome screen now implemented in tab system
 
 # Add text view interactions module
 ui_sources += files(

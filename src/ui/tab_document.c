@@ -12,9 +12,15 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 #include <gtktext/ui/tab_document.h>
-#include <gtktext/ui/welcome_screen.h>
 #include <gtktext/render/cmrender.h>
+#include <gtktext/document/document_manager.h>
 #include <gtktext/editor/buffer_manager.h>
+#include <gtktext/ui/tab_manager.h>
+#include <gtktext/ui/file_actions.h>
+
+/* Forward declarations for welcome button callbacks */
+static void on_welcome_new_clicked(GtkButton *button, gpointer user_data);
+static void on_welcome_open_clicked(GtkButton *button, gpointer user_data);
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HELPERS - Internal utility functions
@@ -31,8 +37,12 @@ static void on_buffer_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, gpointer user
         gboolean was_dirty = td->is_dirty;
         td->is_dirty = TRUE;
 
+        g_debug("TabDocument buffer changed: was_dirty=%s, now_dirty=TRUE, callback=%p",
+               was_dirty ? "TRUE" : "FALSE", td->dirty_state_callback);
+
         /* Phase 3: Notify callback if dirty state changed */
         if (!was_dirty && td->dirty_state_callback) {
+            g_debug("Calling dirty state callback");
             td->dirty_state_callback(td, TRUE, td->dirty_state_callback_data);
         }
     }
@@ -139,6 +149,39 @@ TabDocument *tab_document_new(void)
     return td;
 }
 
+void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window)
+{
+    g_return_if_fail(td != NULL);
+    g_return_if_fail(window != NULL);
+    g_return_if_fail(td->buffer != NULL);
+
+    /* Only initialize if not already done */
+    if (td->doc_manager != NULL) {
+        g_debug("DocumentManager already initialized for this tab");
+        return;
+    }
+
+    /* Create DocumentManager for this document tab */
+    td->doc_manager = document_manager_new(td->buffer, window);
+    if (td->doc_manager) {
+        g_debug("DocumentManager initialized for document tab");
+
+        /* If this tab has a file path, tell the DocumentManager about it */
+        if (td->file_path) {
+            GError *error = NULL;
+            if (!document_manager_open_file(td->doc_manager, td->file_path, &error)) {
+                g_warning("Failed to tell DocumentManager about file path %s: %s",
+                         td->file_path, error ? error->message : "Unknown error");
+                g_clear_error(&error);
+            } else {
+                g_debug("DocumentManager now knows about file: %s", td->file_path);
+            }
+        }
+    } else {
+        g_warning("Failed to create DocumentManager for document tab");
+    }
+}
+
 TabDocument *tab_document_new_from_file(const char *file_path)
 {
     g_return_val_if_fail(file_path != NULL, NULL);
@@ -169,7 +212,53 @@ TabDocument *tab_document_new_welcome(void)
 
     /* Create welcome screen widget */
     td->container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    /* Welcome screen content will be added by the welcome_screen module */
+
+    /* Create welcome screen content */
+    GtkWidget *welcome_content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
+    gtk_widget_set_halign(welcome_content, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(welcome_content, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_top(welcome_content, 48);
+    gtk_widget_set_margin_bottom(welcome_content, 48);
+    gtk_widget_set_margin_start(welcome_content, 48);
+    gtk_widget_set_margin_end(welcome_content, 48);
+
+    /* App title */
+    GtkWidget *title = gtk_label_new(_("GTK Text Editor"));
+    gtk_widget_add_css_class(title, "title-1");
+    gtk_box_append(GTK_BOX(welcome_content), title);
+
+    /* Subtitle */
+    GtkWidget *subtitle = gtk_label_new(_("A simple markdown editor"));
+    gtk_widget_add_css_class(subtitle, "title-3");
+    gtk_widget_add_css_class(subtitle, "dim-label");
+    gtk_box_append(GTK_BOX(welcome_content), subtitle);
+
+    /* Button container */
+    GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_halign(button_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_top(button_box, 24);
+
+    /* New Document button */
+    GtkWidget *new_button = gtk_button_new_with_label(_("New Document"));
+    gtk_widget_add_css_class(new_button, "suggested-action");
+    gtk_widget_add_css_class(new_button, "pill");
+    gtk_widget_set_size_request(new_button, 140, -1);
+    g_object_set_data(G_OBJECT(new_button), "welcome-action", "new");
+    g_object_set_data(G_OBJECT(new_button), "tab-document", td);
+    g_signal_connect(new_button, "clicked", G_CALLBACK(on_welcome_new_clicked), NULL);
+    gtk_box_append(GTK_BOX(button_box), new_button);
+
+    /* Open File button */
+    GtkWidget *open_button = gtk_button_new_with_label(_("Open File"));
+    gtk_widget_add_css_class(open_button, "pill");
+    gtk_widget_set_size_request(open_button, 140, -1);
+    g_object_set_data(G_OBJECT(open_button), "welcome-action", "open");
+    g_object_set_data(G_OBJECT(open_button), "tab-document", td);
+    g_signal_connect(open_button, "clicked", G_CALLBACK(on_welcome_open_clicked), NULL);
+    gtk_box_append(GTK_BOX(button_box), open_button);
+
+    gtk_box_append(GTK_BOX(welcome_content), button_box);
+    gtk_box_append(GTK_BOX(td->container), welcome_content);
 
     td->is_welcome = TRUE;
     td->is_dirty = FALSE;
@@ -296,7 +385,7 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
     td->file_path = g_strdup(file_path);
 
     g_free(td->tab_title);
-    td->tab_title = g_path_get_basename(file_path);
+    td->tab_title = g_strdup(g_path_get_basename(file_path));
 
     /* Phase 3: Use set_modified to trigger callback */
     tab_document_set_modified(td, FALSE);
@@ -330,30 +419,48 @@ gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **e
     g_return_val_if_fail(file_path != NULL, FALSE);
     g_return_val_if_fail(!td->is_welcome, FALSE);
 
-    /* Get buffer text */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(td->buffer, &start, &end);
-    g_autofree char *text = gtk_text_buffer_get_text(td->buffer, &start, &end, FALSE);
+    /* Make a defensive copy to protect against parameter corruption */
+    g_autofree char *safe_file_path = g_strdup(file_path);
+    g_debug("tab_document_save_as: Starting with file_path='%s'", safe_file_path);
 
-    /* Write to file */
-    if (!g_file_set_contents(file_path, text, -1, error)) {
-        return FALSE;
+    /* Use DocumentManager to handle the save operation */
+    if (td->doc_manager) {
+        /* DocumentManager handles the save operation and state management */
+        if (!document_manager_save_as(td->doc_manager, safe_file_path, NULL, NULL)) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "DocumentManager failed to save file: %s", safe_file_path);
+            return FALSE;
+        }
+        g_debug("DocumentManager saved file: %s", safe_file_path);
+    } else {
+        /* Fallback: manual save if no DocumentManager */
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(td->buffer, &start, &end);
+        g_autofree char *text = gtk_text_buffer_get_text(td->buffer, &start, &end, FALSE);
+
+        if (!g_file_set_contents(safe_file_path, text, -1, error)) {
+            return FALSE;
+        }
+        g_debug("Manual save completed: %s", safe_file_path);
     }
 
-    /* Update metadata */
+    /* Update TabDocument metadata */
     g_free(td->file_path);
-    td->file_path = g_strdup(file_path);
+    td->file_path = g_strdup(safe_file_path);
 
     g_free(td->tab_title);
-    td->tab_title = g_path_get_basename(file_path);
+    td->tab_title = g_strdup(g_path_get_basename(td->file_path));
 
     /* Phase 3: Use set_modified to trigger callback */
     tab_document_set_modified(td, FALSE);
 
-    /* Update DocumentManager - simplified for now */
-    /* TODO: Properly integrate with DocumentManager's async save API */
+    /* Verify DocumentManager state after save */
+    if (td->doc_manager) {
+        DocumentState state = document_manager_get_state(td->doc_manager);
+        g_debug("DocumentManager state after save: %d", state);
+    }
 
-    g_debug("Saved file: %s", file_path);
+    g_debug("Saved file: %s", safe_file_path);
     return TRUE;
 }
 
@@ -595,4 +702,74 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
 
     g_debug("Synced source content to WYSIWYG view");
     return TRUE;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * WELCOME SCREEN CALLBACKS - Handle welcome screen button clicks
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+static void on_welcome_new_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)user_data;  // Unused parameter
+    TabDocument *td = g_object_get_data(G_OBJECT(button), "tab-document");
+    if (!td) {
+        g_warning("TabDocument not found for welcome new button");
+        return;
+    }
+
+    g_debug("Welcome 'New Document' button clicked");
+
+    /* Find the app through widget hierarchy */
+    GtkWidget *window = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_WINDOW);
+    if (!window) {
+        g_warning("Could not find window for welcome new action");
+        return;
+    }
+
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+    if (!app) {
+        g_warning("Could not find application for welcome new action");
+        return;
+    }
+
+    /* Get tab manager and create new document tab */
+    TabManager *tm = gtktext_get_tab_manager(app);
+    if (tm) {
+        tab_manager_new_document(tm, _("Untitled"));
+        g_debug("Created new document from welcome screen");
+    }
+}
+
+static void on_welcome_open_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)user_data;  // Unused parameter
+    TabDocument *td = g_object_get_data(G_OBJECT(button), "tab-document");
+    if (!td) {
+        g_warning("TabDocument not found for welcome open button");
+        return;
+    }
+
+    g_debug("Welcome 'Open File' button clicked");
+
+    /* Find the app through widget hierarchy */
+    GtkWidget *window = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_WINDOW);
+    if (!window) {
+        g_warning("Could not find window for welcome open action");
+        return;
+    }
+
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+    if (!app) {
+        g_warning("Could not find application for welcome open action");
+        return;
+    }
+
+    /* Trigger the existing open action */
+    GAction *open_action = g_action_map_lookup_action(G_ACTION_MAP(app), "open");
+    if (open_action) {
+        g_action_activate(open_action, NULL);
+        g_debug("Triggered open action from welcome screen");
+    } else {
+        g_warning("Could not find 'open' action");
+    }
 }

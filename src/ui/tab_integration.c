@@ -38,15 +38,16 @@ GtkWidget *tab_integration_setup_with_single_tab(GtkApplication *app,
     g_object_set_data_full(G_OBJECT(app), "tab_manager", tab_manager,
                           (GDestroyNotify)tab_manager_destroy);
 
-    /* Create initial tab */
-    AdwTabPage *initial_page = tab_manager_new_document(tab_manager, _("Untitled"));
+    /* Create initial welcome tab */
+    AdwTabPage *initial_page = tab_manager_new_welcome(tab_manager);
     if (!initial_page) {
-        g_critical("Failed to create initial tab");
+        g_critical("Failed to create initial welcome tab");
         return NULL;
     }
 
-    /* Get the text view from the initial tab for compatibility */
-    GtkWidget *text_view = tab_manager_get_text_view(tab_manager, initial_page);
+    /* For compatibility with existing code that expects a text view,
+     * return a dummy text view. This will be replaced when documents are opened. */
+    GtkWidget *text_view = gtk_text_view_new();
 
     g_debug("Tab system initialized with single tab for compatibility");
     return text_view;
