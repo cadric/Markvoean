@@ -65,13 +65,17 @@ void document_manager_update_autosave_setting(DocumentManager *dm);
 
 /* State management */
 DocumentState document_manager_get_state(DocumentManager *dm);
-void document_manager_set_state_callback(DocumentManager *dm, 
-                                        StateChangeCallback callback, 
+void document_manager_set_state_callback(DocumentManager *dm,
+                                        StateChangeCallback callback,
                                         gpointer user_data);
 gboolean document_manager_has_unsaved_changes(DocumentManager *dm);
 const gchar* document_manager_get_file_path(DocumentManager *dm);
 const gchar* document_manager_get_display_name(DocumentManager *dm);
 gboolean document_manager_is_untitled(DocumentManager *dm);
+
+/* Buffer change signal management */
+void document_manager_block_buffer_signals(DocumentManager *dm);
+void document_manager_unblock_buffer_signals(DocumentManager *dm);
 
 /* Recovery and drafts */
 gboolean document_manager_save_draft(DocumentManager *dm, GError **error);

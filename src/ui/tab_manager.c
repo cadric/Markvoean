@@ -765,6 +765,9 @@ AdwTabPage *tab_manager_open_file(TabManager *tm, const char *file_path)
     /* Store document association */
     g_hash_table_insert(tm->priv->tab_documents, page, tab_doc);
 
+    /* Phase 3: Set up dirty state callback BEFORE DocumentManager initialization */
+    tab_document_set_dirty_state_callback(tab_doc, on_tab_document_dirty_state_changed, tm);
+
     /* Initialize DocumentManager for this document tab */
     GList *windows = gtk_application_get_windows(tm->priv->app);
     if (windows && windows->data) {
@@ -773,9 +776,6 @@ AdwTabPage *tab_manager_open_file(TabManager *tm, const char *file_path)
     } else {
         g_warning("Could not get main window for DocumentManager initialization");
     }
-
-    /* Phase 3: Set up dirty state callback */
-    tab_document_set_dirty_state_callback(tab_doc, on_tab_document_dirty_state_changed, tm);
 
     /* Connect selection signal */
     g_signal_connect(page, "notify::selected",

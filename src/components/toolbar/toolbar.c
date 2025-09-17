@@ -146,6 +146,10 @@ static void toggle_tag_on_selection(GtkTextBuffer *buffer, const char *tag_name,
     } else {
         gtk_text_buffer_apply_tag(buffer, tag, &start, &end);
     }
+
+    // Manually emit "changed" signal to trigger status updates
+    // since tag changes don't automatically emit this signal
+    g_signal_emit_by_name(buffer, "changed");
 }
 
 /* ========== HANDLERS ========== */

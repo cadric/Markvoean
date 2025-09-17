@@ -43,10 +43,14 @@ struct _TabDocument {
 
     /* Signal handlers */
     gulong buffer_changed_handler_id;
+    gulong source_buffer_changed_handler_id;
 
     /* Phase 3: State change callbacks */
     TabDocumentDirtyStateCallback dirty_state_callback;
     gpointer dirty_state_callback_data;
+
+    /* Markdown rendering state */
+    gchar *pending_markdown_content;  /* Content waiting for deferred rendering */
 };
 
 /* Factory and lifecycle */

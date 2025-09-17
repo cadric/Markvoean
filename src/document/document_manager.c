@@ -1388,6 +1388,30 @@ gchar* document_manager_get_external_content(DocumentManager *dm, GError **error
 {
     g_return_val_if_fail(dm != NULL, NULL);
     g_return_val_if_fail(dm->file_path != NULL, NULL);
-    
+
     return load_external_content(dm, error);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * BUFFER SIGNAL MANAGEMENT - Control buffer change detection
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+void document_manager_block_buffer_signals(DocumentManager *dm)
+{
+    g_return_if_fail(dm != NULL);
+
+    if (dm->buffer && dm->buffer_changed_handler_id > 0) {
+        g_signal_handler_block(dm->buffer, dm->buffer_changed_handler_id);
+        g_debug("DocumentManager buffer signals blocked");
+    }
+}
+
+void document_manager_unblock_buffer_signals(DocumentManager *dm)
+{
+    g_return_if_fail(dm != NULL);
+
+    if (dm->buffer && dm->buffer_changed_handler_id > 0) {
+        g_signal_handler_unblock(dm->buffer, dm->buffer_changed_handler_id);
+        g_debug("DocumentManager buffer signals unblocked");
+    }
 }
