@@ -50,6 +50,80 @@
 				"$gcc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "build-gtktext",
+			"type": "shell",
+			"command": "make",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "meson-compile",
+			"type": "shell",
+			"command": "meson compile -C builddir",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "meson-compile",
+			"type": "shell",
+			"command": "meson compile -C builddir",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "meson-compile",
+			"type": "shell",
+			"command": "meson compile -C builddir",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "meson-compile",
+			"type": "shell",
+			"command": "meson compile -C builddir",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "meson-compile-build",
+			"type": "shell",
+			"command": "meson compile -C build",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "meson-compile",
+			"type": "shell",
+			"command": "meson compile -C builddir",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "meson-compile",
+			"type": "shell",
+			"command": "meson compile -C builddir",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
 		}
 	]
 }

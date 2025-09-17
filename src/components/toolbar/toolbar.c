@@ -8,6 +8,9 @@
 #include <gtktext/components/toolbar.h>
 #include <gtktext/render/cmrender.h>
 #include <gtktext/tag_util.h>
+#include <gtktext/ui/tab_document.h>
+#include <gtktext/ui/tab_manager.h>
+#include <gtktext/ui/tab_integration.h>
 
 /* ========== META ========== */
 /* [1.0.1] - 2025-09-16 - src/toolbar.c
@@ -30,7 +33,7 @@ typedef struct {
     GtkHeaderBar *header_bar;
     GtkButton *bold_button;
     GtkButton *italic_button;
-    GtkButton *heading_button;
+    GtkMenuButton *heading_button;
     GtkButton *code_button;
     GtkButton *hr_button;
     GtkButton *source_view_button;
@@ -294,154 +297,91 @@ static void on_heading_button_clicked(GtkButton *button, gpointer user_data) {
 
 static void on_source_view_button_clicked(GtkButton *button, gpointer user_data) {
     (void)button;  // Unused parameter
-    g_autoptr(GError) error = NULL;
-    
-    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
-        g_warning("Invalid text view for source view toggle: %s", error->message);
+    (void)user_data;  // Don't use user_data as it might be stale after tab switches
+
+    // Get the active tab document from the application
+    GtkWidget *window = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_WINDOW);
+    if (!window) {
+        g_warning("Could not find window for source view toggle");
         return;
     }
 
-    // user_data is the original text view passed to create_toolbar - always valid
-    GtkTextView *original_text_view = GTK_TEXT_VIEW(user_data);
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+    if (!app) {
+        g_warning("Could not find application for source view toggle");
+        return;
+    }
+
+    TabManager *tm = gtktext_get_tab_manager(app);
+    if (!tm) {
+        g_warning("Could not find tab manager for source view toggle");
+        return;
+    }
+
+    AdwTabPage *active_page = tab_manager_get_active_tab(tm);
+    if (!active_page) {
+        g_warning("No active tab for source view toggle");
+        return;
+    }
+
+    TabDocument *tab_doc = tab_manager_get_tab_document(tm, active_page);
+    if (!tab_doc) {
+        g_warning("No tab document for source view toggle");
+        return;
+    }
+
+    // Check if this tab has a text view (welcome tabs don't have one)
+    GtkWidget *text_view_widget = tab_document_get_text_view(tab_doc);
+    if (!text_view_widget) {
+        // Welcome tab or invalid tab - silently ignore source view toggle
+        return;
+    }
+
+    GtkTextView *original_text_view = GTK_TEXT_VIEW(text_view_widget);
+    if (!GTK_IS_TEXT_VIEW(original_text_view)) {
+        // Not a valid text view, silently ignore
+        return;
+    }
     
-    if (toolbar_state.current_view_mode == VIEW_MODE_WYSIWYG) {
+    if (!tab_document_get_source_mode(tab_doc)) {
         // === SWITCH TO SOURCE VIEW ===
-        
-        // Get current buffer content as markdown
-        GtkTextBuffer *current_buffer = gtk_text_view_get_buffer(original_text_view);
-        g_autofree char *markdown = cm_render_buffer_to_markdown(current_buffer);
-        if (!markdown) {
-            g_warning("Failed to extract markdown from buffer");
-            return;
+        if (tab_document_switch_to_source_view(tab_doc)) {
+            // Update UI state
+            GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
+            gtk_button_set_child(GTK_BUTTON(button), wysiwyg_icon);
+            gtk_widget_set_tooltip_text(GTK_WIDGET(button), _("Switch to WYSIWYG view"));
+
+            // Disable formatting buttons
+            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
+            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
+            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), FALSE);
+            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
+            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
+
+            g_debug("Switched to source view");
+        } else {
+            g_warning("Failed to switch to source view");
         }
-        
-        // Find the scrolled window container (should be consistent)
-        GtkWidget *scrolled_window = gtk_widget_get_ancestor(GTK_WIDGET(original_text_view), GTK_TYPE_SCROLLED_WINDOW);
-        if (!scrolled_window || !GTK_IS_SCROLLED_WINDOW(scrolled_window)) {
-            g_warning("Could not find valid scrolled window parent for text view");
-            return;
-        }
-        
-        // Store references for restoration
-        toolbar_state.scrolled_window = scrolled_window;
-        toolbar_state.original_text_view = original_text_view;
-        
-        // Create new source view components (destroy old ones first if they exist)
-        if (toolbar_state.source_text_view) {
-            GtkWidget *old_parent = gtk_widget_get_parent(GTK_WIDGET(toolbar_state.source_text_view));
-            if (old_parent) {
-                gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(old_parent), NULL);
-            }
-        }
-        
-        // Create fresh source buffer and view
-        toolbar_state.source_buffer = gtk_text_buffer_new(NULL);
-        toolbar_state.source_text_view = GTK_TEXT_VIEW(gtk_text_view_new_with_buffer(toolbar_state.source_buffer));
-        
-        // Configure source view
-        gtk_text_view_set_wrap_mode(toolbar_state.source_text_view, GTK_WRAP_WORD);
-        gtk_text_view_set_left_margin(toolbar_state.source_text_view, 12);
-        gtk_text_view_set_right_margin(toolbar_state.source_text_view, 12);
-        gtk_text_view_set_top_margin(toolbar_state.source_text_view, 12);
-        gtk_text_view_set_bottom_margin(toolbar_state.source_text_view, 12);
-        gtk_widget_add_css_class(GTK_WIDGET(toolbar_state.source_text_view), "monospace");
-        
-        // Set markdown content
-        gtk_text_buffer_set_text(toolbar_state.source_buffer, markdown, -1);
-        
-        // Swap views in container
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), NULL);
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), 
-                                    GTK_WIDGET(toolbar_state.source_text_view));
-        
-        // Update UI state
-        GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
-        gtk_button_set_child(toolbar_state.source_view_button, wysiwyg_icon);
-        gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), 
-                                   _("Switch to WYSIWYG view"));
-        
-        // Disable formatting buttons
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), FALSE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
-        
-        toolbar_state.current_view_mode = VIEW_MODE_SOURCE;
-        g_debug("Switched to source view");
-        
+
     } else {
         // === SWITCH BACK TO WYSIWYG VIEW ===
-        
-        // Validate we have the necessary components
-        if (!toolbar_state.scrolled_window || !GTK_IS_SCROLLED_WINDOW(toolbar_state.scrolled_window)) {
-            g_warning("Could not restore view - invalid scrolled window");
-            return;
+        if (tab_document_switch_to_wysiwyg_view(tab_doc)) {
+            // Update UI state
+            GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
+            gtk_button_set_child(GTK_BUTTON(button), source_icon);
+            gtk_widget_set_tooltip_text(GTK_WIDGET(button), _("Switch to source view"));
+
+            // Re-enable formatting buttons
+            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
+            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
+            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), TRUE);
+            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
+            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
+
+            g_debug("Switched to WYSIWYG view");
+        } else {
+            g_warning("Failed to switch to WYSIWYG view");
         }
-        
-        if (!toolbar_state.original_text_view || !GTK_IS_TEXT_VIEW(toolbar_state.original_text_view)) {
-            g_warning("Could not restore view - invalid original text view");
-            return;
-        }
-        
-        if (!toolbar_state.source_buffer || !GTK_IS_TEXT_BUFFER(toolbar_state.source_buffer)) {
-            g_warning("Could not restore view - invalid source buffer");
-            return;
-        }
-        
-        // Get edited markdown content
-        GtkTextIter start, end;
-        gtk_text_buffer_get_bounds(toolbar_state.source_buffer, &start, &end);
-        g_autofree char *source_markdown = gtk_text_buffer_get_text(toolbar_state.source_buffer, &start, &end, FALSE);
-        
-        // Remove source view and restore original
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(toolbar_state.scrolled_window), NULL);
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(toolbar_state.scrolled_window), 
-                                    GTK_WIDGET(toolbar_state.original_text_view));
-        
-        // Clean up source view components
-        toolbar_state.source_text_view = NULL; // Widget is automatically destroyed when removed
-        if (toolbar_state.source_buffer) {
-            g_object_unref(toolbar_state.source_buffer);
-            toolbar_state.source_buffer = NULL;
-        }
-        
-        // Update main buffer with edited content
-        if (source_markdown && strlen(source_markdown) > 0) {
-            GtkTextBuffer *main_buffer = gtk_text_view_get_buffer(toolbar_state.original_text_view);
-            
-            // Suppress reparse during manual buffer update
-            g_object_set_data(G_OBJECT(main_buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
-            gtk_text_buffer_set_text(main_buffer, "", 0);
-            
-            // Get soup session for image loading
-            SoupSession *soup_session = g_object_get_data(G_OBJECT(toolbar_state.original_text_view), "soup-session");
-            if (!soup_session) {
-                soup_session = soup_session_new();
-                g_object_set_data_full(G_OBJECT(toolbar_state.original_text_view), "soup-session", soup_session, g_object_unref);
-            }
-            
-            cm_render_markdown_to_buffer(main_buffer, source_markdown, toolbar_state.original_text_view, soup_session);
-            
-            // Re-enable parsing
-            g_object_set_data(G_OBJECT(main_buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
-        }
-        
-        // Update UI state
-        GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
-        gtk_button_set_child(toolbar_state.source_view_button, source_icon);
-        gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), 
-                                   _("Switch to source view"));
-        
-        // Re-enable formatting buttons
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), TRUE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
-        gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
-        
-        toolbar_state.current_view_mode = VIEW_MODE_WYSIWYG;
-        g_debug("Switched to WYSIWYG view");
     }
 }
 
@@ -463,7 +403,7 @@ static void toolbar_connect_signals(ToolbarComponent *t, GtkTextView *text_view)
         g_signal_connect(t->hr_button, "clicked", G_CALLBACK(on_hr_button_clicked), text_view);
     }
     if (t->source_view_button) {
-        g_signal_connect(t->source_view_button, "clicked", G_CALLBACK(on_source_view_button_clicked), text_view);
+        g_signal_connect(t->source_view_button, "clicked", G_CALLBACK(on_source_view_button_clicked), NULL);
     }
 }
 
@@ -498,7 +438,7 @@ static void setup_heading_menu(GtkWidget *heading_button, GtkWidget *text_view) 
 /* ========== LIFECYCLE ========== */
 GtkWidget* create_toolbar(GtkWidget *text_view) {
     g_autoptr(GError) error = NULL;
-    
+
     if (!validate_text_view(GTK_TEXT_VIEW(text_view), &error)) {
         g_warning("Invalid text view for toolbar: %s", error->message);
         return NULL;
@@ -511,14 +451,14 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     // Find or create toolbar container
     GtkWidget *parent_window = gtk_widget_get_ancestor(text_view, GTK_TYPE_WINDOW);
     GtkWidget *toolbar_container = NULL;
-    
+
     if (parent_window) {
         GtkBuilder *builder = g_object_get_data(G_OBJECT(parent_window), "builder");
         if (builder) {
             toolbar_container = GTK_WIDGET(gtk_builder_get_object(builder, "toolbar_container"));
         }
     }
-    
+
     if (!toolbar_container) {
         toolbar_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
         gtk_widget_add_css_class(toolbar_container, "toolbar");
@@ -533,13 +473,25 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
         child = next;
     }
     
-    // Create buttons
+    // Create buttons with explicit sizing
     toolbar_state.italic_button = GTK_BUTTON(gtk_button_new_with_label("Kursiv"));
+    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 60, 32);
+
     toolbar_state.bold_button = GTK_BUTTON(gtk_button_new_with_label("Fed"));
+    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 50, 32);
+
     toolbar_state.code_button = GTK_BUTTON(gtk_button_new_with_label("Kode"));
+    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 50, 32);
+
     toolbar_state.hr_button = GTK_BUTTON(gtk_button_new_with_label("HR"));
-    toolbar_state.heading_button = GTK_BUTTON(gtk_menu_button_new());
+    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 40, 32);
+
+    toolbar_state.heading_button = GTK_MENU_BUTTON(gtk_menu_button_new());
+    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 80, 32);
+
     toolbar_state.source_view_button = GTK_BUTTON(gtk_button_new());
+    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 40, 32);
+
     
     // Create icon for source view button
     GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
@@ -560,32 +512,148 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.heading_button), "Vælg overskriftstype");
     gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), _("Switch to source view"));
     
-    // Add buttons to container
+    // Add buttons to container and make them visible
     gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.italic_button));
+    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.italic_button), TRUE);
+
     gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.bold_button));
+    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.bold_button), TRUE);
+
     gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.code_button));
+    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.code_button), TRUE);
+
     gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.hr_button));
+    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.hr_button), TRUE);
     
     // Add separator
     GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_set_margin_start(separator, 6);
     gtk_widget_set_margin_end(separator, 6);
     gtk_box_append(GTK_BOX(toolbar_container), separator);
-    
+    gtk_widget_set_visible(separator, TRUE);
+
     gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.heading_button));
-    
+    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.heading_button), TRUE);
+
     // Add another separator for view toggle
     GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_set_margin_start(separator2, 6);
     gtk_widget_set_margin_end(separator2, 6);
     gtk_box_append(GTK_BOX(toolbar_container), separator2);
-    
+    gtk_widget_set_visible(separator2, TRUE);
+
     gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.source_view_button));
+    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.source_view_button), TRUE);
     
     // Connect all signals
     toolbar_connect_signals(&toolbar_state, toolbar_state.text_view);
     setup_heading_menu(GTK_WIDGET(toolbar_state.heading_button), GTK_WIDGET(toolbar_state.text_view));
-    
-    g_debug("Toolbar created successfully");
+
+    // Make sure toolbar is visible
+    gtk_widget_set_visible(toolbar_container, TRUE);
+
+    g_debug("Toolbar created successfully and made visible");
     return toolbar_container;
+}
+
+void toolbar_update_text_view(GtkWidget *new_text_view)
+{
+    if (!new_text_view || !GTK_IS_TEXT_VIEW(new_text_view)) {
+        g_warning("Invalid text view passed to toolbar_update_text_view: %p", new_text_view);
+        return;
+    }
+
+    if (!toolbar_state.text_view) {
+        g_warning("Toolbar not initialized, cannot update text view");
+        return;
+    }
+
+    // Don't update if it's the same text view
+    if (toolbar_state.text_view == GTK_TEXT_VIEW(new_text_view)) {
+        return;
+    }
+
+    g_debug("Updating toolbar text view from %p to %p", toolbar_state.text_view, new_text_view);
+
+    // Disconnect old signal handlers
+    if (toolbar_state.italic_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.italic_button, on_italic_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.bold_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.bold_button, on_bold_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.code_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.code_button, on_code_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.hr_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.hr_button, on_hr_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.source_view_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.source_view_button, on_source_view_button_clicked, NULL);
+    }
+
+    // Update the toolbar state
+    toolbar_state.text_view = GTK_TEXT_VIEW(new_text_view);
+    toolbar_state.buffer = gtk_text_view_get_buffer(toolbar_state.text_view);
+
+    // Get the tab document to sync with its view mode
+    GtkWidget *window = gtk_widget_get_ancestor(new_text_view, GTK_TYPE_WINDOW);
+    if (window) {
+        GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+        if (app) {
+            TabManager *tm = gtktext_get_tab_manager(app);
+            if (tm) {
+                AdwTabPage *active_page = tab_manager_get_active_tab(tm);
+                if (active_page) {
+                    TabDocument *tab_doc = tab_manager_get_tab_document(tm, active_page);
+                    if (tab_doc) {
+                        // Sync toolbar UI with tab's current view mode
+                        gboolean is_source_mode = tab_document_get_source_mode(tab_doc);
+                        if (is_source_mode) {
+                            // Tab is in source mode - update toolbar to reflect this
+                            if (toolbar_state.source_view_button) {
+                                GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
+                                gtk_button_set_child(toolbar_state.source_view_button, wysiwyg_icon);
+                                gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button),
+                                                           _("Switch to WYSIWYG view"));
+                            }
+                            // Disable formatting buttons
+                            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
+                            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
+                            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), FALSE);
+                            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
+                            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
+                        } else {
+                            // Tab is in WYSIWYG mode - update toolbar to reflect this
+                            if (toolbar_state.source_view_button) {
+                                GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
+                                gtk_button_set_child(toolbar_state.source_view_button, source_icon);
+                                gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button),
+                                                           _("Switch to source view"));
+                            }
+                            // Enable formatting buttons
+                            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
+                            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
+                            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), TRUE);
+                            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
+                            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Reconnect signals with new text view
+    toolbar_connect_signals(&toolbar_state, toolbar_state.text_view);
+
+    // Also need to update the heading menu - recreate it for the new text view
+    if (toolbar_state.heading_button) {
+        // Clear old popover
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(toolbar_state.heading_button), NULL);
+        // Setup new one
+        setup_heading_menu(GTK_WIDGET(toolbar_state.heading_button), GTK_WIDGET(toolbar_state.text_view));
+    }
+
+    g_debug("Toolbar updated to new text view and signals reconnected");
 }

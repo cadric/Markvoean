@@ -17,6 +17,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [1.3.2] - 2025-09-17
+
+### Fixed
+- Segfault when closing tabs due to mismatched `AdwTabView::page-detached` handler signature
+    - Corrected parameter type to `gint position` and added robust fallback to fetch `TabManager` from `tab_view` data
+    - Prevents `user_data=0x1` corruption and stabilizes tab close/detach workflow
+
+### Technical
+- Store `tab_manager` back-reference on `AdwTabView` and clear it on teardown
+- Minor defensive checks in detach handler for safer cleanup
+
+## [1.3.1] - 2025-09-17
+
+### Fixed
+- **Critical GObject Errors**: Fixed NULL class pointer errors during tab close operations
+  - Added proper validation in `tab_document_destroy()` before signal disconnection
+  - Prevents crashes when disconnecting signals from invalid buffer objects
+- **Missing UI Components Restored**: Toolbar and status bar functionality fully restored for tab-based UI
+  - Toolbar with formatting buttons (Bold, Italic, Code, Headings, etc.) now works with active tab
+  - Status bar shows save notifications and current file location
+  - Both components properly integrated with tab switching system
+- **Save-As Dialog**: Fixed missing save-as dialog for untitled documents in close workflow
+  - Closing unsaved untitled tabs now shows proper save-as dialog
+  - Dialog completion properly handles both save success and cancellation cases
+  - Maintains tab close workflow integrity after save operations
+- **GTK Label Warnings**: Eliminated width measurement warnings for status bar labels
+  - Added proper width constraints and ellipsization to prevent layout issues
+  - Status labels now handle long text gracefully without warnings
+
+### Technical Improvements
+- Enhanced tab close workflow with proper async dialog handling
+- Improved error handling in file save operations during tab closure
+- Better resource cleanup and signal management across tab operations
+
+## [1.3.0] - 2025-09-17
+
+### Added
+- **Phase 4 Advanced Tab Features**: Complete implementation of professional-grade tab interface
+  - Keyboard navigation between tabs (Ctrl+PageUp/PageDown, Ctrl+Tab/Ctrl+Shift+Tab)
+  - Tab reordering via drag-and-drop (native AdwTabView functionality)
+  - Right-click context menu framework (simplified for GTK4 compatibility)
+  - Smart tab overflow handling with automatic scrolling
+  - Optimized tab bar behavior with non-expanding tabs
+- **Enhanced User Experience**:
+  - Wraparound tab navigation for seamless workflow
+  - Intuitive keyboard shortcuts following standard conventions
+  - Automatic tab bar autohide when only one tab is open
+  - Professional tab management capabilities
+
+### Changed
+- **Tab Navigation**: Added comprehensive keyboard shortcuts for power users
+- **Tab Bar Configuration**: Optimized spacing and behavior for better UX
+- **Event Handling**: Enhanced with proper GTK4 event controller patterns
+
+### Technical
+- Added `tab_manager_select_next_tab()` and `tab_manager_select_previous_tab()` functions
+- Implemented `on_tab_view_key_pressed()` for keyboard navigation handling
+- Added GTK4-compatible event controller for tab interactions
+- Enhanced TabManager with advanced configuration options
+- Prepared framework for future context menu implementation
+
+## [1.2.0] - 2025-09-17
+
+### Added
+- **Phase 3 Document State Management**: Complete implementation of tab-based document state tracking
+  - Dirty state indicators in tab titles (• bullet shows unsaved changes)
+  - Real-time tab title updates when document content changes
+  - Tab close confirmation dialog for unsaved changes with save/discard/cancel options
+  - Automatic state management callbacks between TabDocument and TabManager
+- **Enhanced User Experience**:
+  - Tab titles automatically update to show file basename after save operations
+  - Visual dirty state indicator follows GNOME HIG patterns
+  - AdwAlertDialog for consistent unsaved changes confirmation
+  - Proper cleanup of tab resources on close
+
+### Changed
+- **TabDocument API**: Added callback system for state change notifications
+- **Tab Title Management**: Unified system for updating tab titles with dirty state
+- **File Operations**: Save operations now properly clear dirty state and update titles
+- **Tab Closing**: Enhanced with unsaved changes detection and user confirmation
+
+### Technical
+- Added `TabDocumentDirtyStateCallback` type for state change notifications
+- Implemented `tab_document_set_dirty_state_callback()` for TabManager integration
+- Added automatic tab title updates via `update_tab_title()` function
+- Created `show_unsaved_changes_dialog()` with proper AdwAlertDialog integration
+- Enhanced buffer change tracking to trigger callback-based title updates
+- Added `cleanup_tab_resources()` helper for proper tab cleanup
+
+## [1.1.0] - 2025-09-17
+
+### Added
+- **Phase 2 Tab-Aware File Operations**: Complete implementation of file operations in tab context
+  - Open files now create new tabs instead of replacing current content
+  - Save operations work with active tab document
+  - Save-as operations preserve current filename as initial suggestion
+  - Tab-aware dialog completion handlers with proper context management
+- **Enhanced File Dialog Integration**:
+  - File dialogs now use tab-specific completion callbacks
+  - Improved filename suggestions based on current document state
+  - Context structures for async dialog operations
+
+### Changed
+- **File Actions Architecture**: Updated file_actions.c to use TabManager and TabDocument APIs
+- **Save Behavior**: Save operations now target the active tab instead of global document state
+- **Dialog Workflows**: File dialogs integrated with multi-document tab system
+
+### Technical
+- Added `file_action_on_open_dialog_finish_tab()` for tab-aware file opening
+- Added `file_action_on_save_as_dialog_finish_tab()` for tab-aware save-as operations
+- Updated `file_action_save_cb()` and `file_action_save_as_cb()` to work with active tab
+- Added TabDocument header dependency to file_actions.c
+- Used proper C17 type definitions instead of `typeof` for compiler compatibility
+
 ## [1.0.8] - 2025-09-16
 
 **MAJOR ACHIEVEMENT: Complete Modularization & Stability Fixes**

@@ -39,6 +39,13 @@ ui_sources += files(
   'event_handlers.c'
 )
 
+# Add tab management modules
+ui_sources += files(
+  'tab_manager.c',
+  'tab_document.c',
+  'tab_integration.c'
+)
+
 
 # Export sources for parent build
 ui_lib_sources = ui_sources

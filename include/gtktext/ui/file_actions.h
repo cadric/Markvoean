@@ -24,7 +24,9 @@ void file_action_save_as_cb(GSimpleAction *action, GVariant *parameter, gpointer
 
 /* Dialog completion callbacks */
 void file_action_on_open_dialog_finish(GObject *source_object, GAsyncResult *res, gpointer user_data);
+void file_action_on_open_dialog_finish_tab(GObject *source_object, GAsyncResult *res, gpointer user_data);
 void file_action_on_save_as_dialog_finish(GObject *source_object, GAsyncResult *res, gpointer user_data);
+void file_action_on_save_as_dialog_finish_tab(GObject *source_object, GAsyncResult *res, gpointer user_data);
 
 /* Helper functions */
 void file_action_setup_open_dialog_filters(GtkFileDialog *dialog);

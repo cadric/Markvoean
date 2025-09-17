@@ -37,6 +37,8 @@
 #include <gtktext/render/markdown/markdown_engine.h>
 #include <gtktext/editor/buffer_manager.h>
 #include <gtktext/core/signal_manager.h>
+#include <gtktext/ui/tab_manager.h>
+#include <gtktext/ui/tab_integration.h>
 
 /* External functions now handled by specialized modules */
 
@@ -91,37 +93,40 @@ void app_initialization_activate(GApplication *application)
     /* Ensure window action context has the application action group */
     gtk_widget_insert_action_group(window, "app", G_ACTION_GROUP(app));
 
-    GtkWidget *text_view = GTK_WIDGET(gtk_builder_get_object(builder, "text_view"));
-    if (!text_view) {
-        g_critical("Failed to get text_view from UI");
+    /* Get tab infrastructure from UI */
+    AdwTabView *tab_view = ADW_TAB_VIEW(gtk_builder_get_object(builder, "tab_view"));
+    AdwTabBar *tab_bar = ADW_TAB_BAR(gtk_builder_get_object(builder, "tab_bar"));
+    if (!tab_view || !tab_bar) {
+        g_critical("Failed to get tab_view or tab_bar from UI");
         g_object_unref(builder);
         return;
     }
 
-    /* Get status bar widgets */
+    /* Initialize tab system with compatibility layer */
+    GtkWidget *text_view = tab_integration_setup_with_single_tab(app, tab_view, tab_bar);
+    if (!text_view) {
+        g_critical("Failed to initialize tab system");
+        g_object_unref(builder);
+        return;
+    }
+
+    /* Phase 5: Get status bar widgets - restored for tab-based UI */
     GtkWidget *save_status = GTK_WIDGET(gtk_builder_get_object(builder, "save_status"));
     GtkWidget *file_location = GTK_WIDGET(gtk_builder_get_object(builder, "file_location"));
-    GtkWidget *main_stack = GTK_WIDGET(gtk_builder_get_object(builder, "main_stack"));
-    GtkWidget *welcome_open_button = GTK_WIDGET(gtk_builder_get_object(builder, "welcome_open_button"));
-    GtkWidget *welcome_new_button = GTK_WIDGET(gtk_builder_get_object(builder, "welcome_new_button"));
 
-    if (!save_status || !file_location || !main_stack || !welcome_open_button || !welcome_new_button) {
-        g_critical("Failed to get required UI components");
-        g_object_unref(builder);
-        return;
+    /* Store status bar widgets for access by status manager */
+    if (save_status) {
+        g_object_set_data(G_OBJECT(app), "save_status", save_status);
+    }
+    if (file_location) {
+        g_object_set_data(G_OBJECT(app), "file_location", file_location);
     }
 
-    /* Expose widgets to application scope for actions to use */
-    g_object_set_data(G_OBJECT(app), "text_view", text_view);
-    g_object_set_data(G_OBJECT(app), "main_stack", main_stack);
-    g_object_set_data(G_OBJECT(app), "welcome_open_button", welcome_open_button);
-    g_object_set_data(G_OBJECT(app), "welcome_new_button", welcome_new_button);
-    g_object_set_data(G_OBJECT(app), "save_status", save_status);
-    g_object_set_data(G_OBJECT(app), "file_location", file_location);
 
-    /* Initialize status bar with default values */
-    status_manager_update_save_status(app, _("Ready"));
-    status_manager_update_file_location(app, NULL);
+    /* Expose widgets to application scope for actions to use */
+    g_object_set_data(G_OBJECT(app), "text_view", text_view);  /* Compatibility - points to first tab's text view */
+
+    /* Status management will be handled per-tab in Phase 2 */
 
     /* Create and initialize DocumentManager */
     GtkWindow *main_window = gtk_application_get_active_window(app);
@@ -151,38 +156,49 @@ void app_initialization_activate(GApplication *application)
                           g_object_unref);
 #endif
 
-    /* Create toolbar and add to container */
-    GtkWidget *toolbar_container = GTK_WIDGET(gtk_builder_get_object(builder,
-                                                                    "toolbar_container"));
-    if (!toolbar_container) {
-        g_critical("Failed to get toolbar_container from UI");
-        g_object_unref(builder);
-        return;
-    }
-
-    /* Add CSS styling to toolbar */
-    GtkCssProvider *provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(provider,
-        ".toolbar { background-color: @theme_bg_color; border-bottom: 1px solid @borders; "
-        "padding: 8px; margin: 4px; }"
-        ".toolbar button { padding: 4px 8px; min-height: 24px; }");
-    gtk_style_context_add_provider_for_display(
-        gdk_display_get_default(),
-        GTK_STYLE_PROVIDER(provider),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(provider);
-
     /* Store builder reference with window */
     g_object_set_data_full(G_OBJECT(window), "builder", g_object_ref(builder),
                           g_object_unref);
 
-    /* Create toolbar and add to UI */
-    GtkWidget *toolbar = create_toolbar(text_view);
+    /* Phase 5: Initialize toolbar with active tab's text view (after builder is stored) */
+    /* Find the AdwToolbarView directly from UI builder */
+    GObject *toolbar_view_obj = gtk_builder_get_object(builder, "main_window");
+    if (toolbar_view_obj && ADW_IS_APPLICATION_WINDOW(toolbar_view_obj)) {
+        GtkWidget *content = gtk_window_get_child(GTK_WINDOW(toolbar_view_obj));
+        g_debug("Window content widget: %s", content ? G_OBJECT_TYPE_NAME(content) : "NULL");
 
-    /* Ensure toolbar is visible and correctly added */
-    if (toolbar && toolbar_container) {
-        gtk_widget_set_visible(toolbar_container, TRUE);
-        g_message("Toolbar is visible and active");
+        /* AdwApplicationWindow might wrap content multiple times, let's search deeper */
+        GtkWidget *toolbar_view = content;
+        while (toolbar_view && !ADW_IS_TOOLBAR_VIEW(toolbar_view)) {
+            GtkWidget *child = gtk_widget_get_first_child(toolbar_view);
+            g_debug("Searching deeper: current=%s, child=%s",
+                   G_OBJECT_TYPE_NAME(toolbar_view),
+                   child ? G_OBJECT_TYPE_NAME(child) : "NULL");
+            if (!child) break;
+            toolbar_view = child;
+        }
+
+        if (toolbar_view && ADW_IS_TOOLBAR_VIEW(toolbar_view)) {
+            /* Use the existing create_toolbar function to get fully functional toolbar */
+            GtkWidget *functional_toolbar = create_toolbar(text_view);
+            if (functional_toolbar) {
+                /* Style the functional toolbar for left alignment */
+                gtk_widget_set_halign(functional_toolbar, GTK_ALIGN_START);
+                gtk_widget_set_margin_start(functional_toolbar, 12);
+                gtk_widget_set_margin_top(functional_toolbar, 6);
+                gtk_widget_set_margin_bottom(functional_toolbar, 6);
+
+                /* Add the functional toolbar directly as second top-bar */
+                adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), functional_toolbar);
+
+                g_debug("Toolbar added as second top-bar successfully");
+            }
+        } else {
+            g_warning("Could not find AdwToolbarView - toolbar_view is: %s",
+                     toolbar_view ? G_OBJECT_TYPE_NAME(toolbar_view) : "NULL");
+        }
+    } else {
+        g_warning("Could not find main_window in builder");
     }
 
     /* Setup key controller to detect Ctrl+C */
@@ -220,12 +236,7 @@ void app_initialization_activate(GApplication *application)
     /* Install blockquote overlay for visual left border */
     text_view_setup_blockquote_overlay(GTK_TEXT_VIEW(text_view));
 
-    /* Connect welcome screen buttons */
-    g_signal_connect(welcome_open_button, "clicked", G_CALLBACK(welcome_screen_open_cb), app);
-    g_signal_connect(welcome_new_button, "clicked", G_CALLBACK(welcome_screen_new_cb), app);
-
-    /* Store main_stack reference for setting visibility after window is shown */
-    g_object_set_data(G_OBJECT(window), "main_stack", main_stack);
+    /* Welcome screen removed - handled by tabs now */
 
     /* Initialize buffer manager and connect change handlers */
     buffer_manager_initialize_buffer(buffer, app);
@@ -263,9 +274,11 @@ void app_initialization_activate(GApplication *application)
     g_signal_connect(window, "close-request", G_CALLBACK(window_lifecycle_on_window_close_request), text_view);
 
     /* Wire headerbar buttons to actions */
+    GtkWidget *new_tab_button = GTK_WIDGET(gtk_builder_get_object(builder, "new_tab_button"));
     GtkWidget *open_button = GTK_WIDGET(gtk_builder_get_object(builder, "open_button"));
     GtkWidget *save_button = GTK_WIDGET(gtk_builder_get_object(builder, "save_button"));
     GtkWidget *save_as_button = GTK_WIDGET(gtk_builder_get_object(builder, "save_as_button"));
+    if (new_tab_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(new_tab_button), "app.new-tab");
     if (open_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(open_button), "app.open");
     if (save_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(save_button), "app.save");
     if (save_as_button) gtk_actionable_set_action_name(GTK_ACTIONABLE(save_as_button),
@@ -288,8 +301,8 @@ void app_initialization_activate(GApplication *application)
     g_object_set(text_view, "editable", TRUE, "cursor-visible", TRUE, NULL);
     g_signal_connect(text_view, "map", G_CALLBACK(window_lifecycle_on_map), text_view);
 
-    /* Connect window map signal to set welcome screen after proper initialization */
-    g_signal_connect(window, "map", G_CALLBACK(window_lifecycle_on_window_map), NULL);
+    /* Window map signal - may need adjustment for tabs */
+    /* g_signal_connect(window, "map", G_CALLBACK(window_lifecycle_on_window_map), NULL); */
 
     /* Check for autorecover on startup */
     dialogs_check_for_autorecover(app);

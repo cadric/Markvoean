@@ -19,6 +19,7 @@
 #include <gtktext/core/signal_manager.h>
 #include <gtktext/ui/file_actions.h>
 #include <gtktext/ui/app_actions.h>
+#include <gtktext/ui/tab_integration.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * STATE - Application subsystem managers
@@ -93,6 +94,8 @@ int main(int argc, char *argv[])
     app = adw_application_new("com.example.MiniTextEditor", G_APPLICATION_HANDLES_OPEN);
 
     const GActionEntry app_actions[] = {
+        { "new-tab", tab_integration_new_tab_action, NULL, NULL, NULL, {0} },
+        { "close-tab", tab_integration_close_tab_action, NULL, NULL, NULL, {0} },
         { "open", file_action_open_cb, NULL, NULL, NULL, {0} },
         { "save", file_action_save_cb, NULL, NULL, NULL, {0} },
         { "save-as", file_action_save_as_cb, NULL, NULL, NULL, {0} },
@@ -105,9 +108,14 @@ int main(int argc, char *argv[])
                                    G_N_ELEMENTS(app_actions), app);
 
   // Debug: To inspect actions at runtime, run with GTK_DEBUG=actions
+  // Tab shortcuts (HIG compliant)
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.new-tab", (const char*[]){ "<primary>t", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.close-tab", (const char*[]){ "<primary>w", NULL });
+  // File shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.open", (const char*[]){ "<primary>o", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save", (const char*[]){ "<primary>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save-as", (const char*[]){ "<primary><shift>s", NULL });
+  // App shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.preferences", (const char*[]){ "<primary>comma", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.shortcuts", (const char*[]){ "<primary>question", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.about", (const char*[]){ NULL });

@@ -1,8 +1,8 @@
-# [1.0.8] - 2025-09-16 - meson.build
-# Fixed: GTK allocation warnings and updated to modern GTK4 APIs
+# [1.3.1] - 2025-09-17 - meson.build
+# Fixed: Phase 5 critical issues - restored toolbar/status bar, fixed GObject errors, improved close workflow
 
 project('gtktext', 'c',
-  version: '1.0.8',
+  version: '1.3.2',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

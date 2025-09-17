@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- [1.0.0] - 2025-01-16 - ui/main_window.ui
-     MAJOR RELEASE: Status bar integration for DocumentManager system.
+<!-- [1.1.0] - 2025-09-17 - ui/main_window.ui
+     MINOR RELEASE: Tabbed document interface with AdwTabView
 -->
 <interface>
   <requires lib="gtk" version="4.0"/>
@@ -16,8 +16,18 @@
     <child>
       <object class="AdwToolbarView">
         <child type="top">
-          <object class="AdwHeaderBar">
+          <object class="AdwHeaderBar" id="header_bar">
             <property name="show-end-title-buttons">true</property>
+            <child type="start">
+              <object class="GtkButton" id="new_tab_button">
+                <property name="icon-name">tab-new-symbolic</property>
+                <property name="tooltip-text" translatable="yes">New Tab</property>
+                <accessibility>
+                  <property name="label" translatable="yes">New tab</property>
+                  <property name="description" translatable="yes">Create a new document tab</property>
+                </accessibility>
+              </object>
+            </child>
             <child type="start">
               <object class="GtkButton" id="open_button">
                 <property name="icon-name">document-open-symbolic</property>
@@ -48,6 +58,11 @@
                 </accessibility>
               </object>
             </child>
+            <child type="title">
+              <object class="AdwTabBar" id="tab_bar">
+                <property name="autohide">true</property>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkMenuButton">
                 <property name="icon-name">open-menu-symbolic</property>
@@ -62,176 +77,53 @@
           </object>
         </child>
         <child>
-          <object class="GtkStack" id="main_stack">
-            <property name="vhomogeneous">false</property>
-            <property name="hhomogeneous">false</property>
-            <property name="transition-type">slide-left-right</property>
-            <property name="transition-duration">200</property>
+          <object class="AdwTabView" id="tab_view">
             <accessibility>
-              <property name="label" translatable="yes">Application views</property>
-              <property name="description" translatable="yes">Switch between welcome screen and editor view</property>
+              <property name="label" translatable="yes">Document tabs</property>
+              <property name="description" translatable="yes">Multiple document tabs</property>
             </accessibility>
+            <!-- Tab pages will be added dynamically -->
+          </object>
+        </child>
+
+        <!-- Phase 5: Status bar for save notifications and file info -->
+        <child type="bottom">
+          <object class="GtkBox" id="status_bar_container">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="margin-start">6</property>
+            <property name="margin-end">6</property>
+            <property name="margin-top">2</property>
+            <property name="margin-bottom">2</property>
+            <property name="height-request">24</property>
+            <style>
+              <class name="statusbar"/>
+            </style>
+
             <child>
-              <object class="GtkStackPage">
-                <property name="name">welcome</property>
-                <property name="title">Welcome</property>
-                <property name="child">
-                  <object class="GtkBox">
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">24</property>
-                    <property name="halign">center</property>
-                    <property name="valign">center</property>
-                    <property name="hexpand">true</property>
-                    <property name="vexpand">true</property>
-                    <property name="width-request">400</property>
-                    <property name="height-request">300</property>
-                    <property name="margin-top">48</property>
-                    <property name="margin-bottom">48</property>
-                    <property name="margin-start">48</property>
-                    <property name="margin-end">48</property>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">text-x-generic-symbolic</property>
-                        <property name="pixel-size">96</property>
-                        <style>
-                          <class name="dim-label"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="label" translatable="yes">Open Document</property>
-                        <property name="halign">center</property>
-                        <style>
-                          <class name="title-1"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="label" translatable="yes">Select a .md file to open or create a new document</property>
-                        <property name="halign">center</property>
-                        <style>
-                          <class name="dim-label"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkBox">
-                        <property name="orientation">horizontal</property>
-                        <property name="spacing">12</property>
-                        <property name="halign">center</property>
-                        <child>
-                          <object class="GtkButton" id="welcome_new_button">
-                            <property name="label" translatable="yes">New File</property>
-                            <accessibility>
-                              <property name="label" translatable="yes">Create new file</property>
-                              <property name="description" translatable="yes">Create a new markdown document</property>
-                            </accessibility>
-                            <style>
-                              <class name="pill"/>
-                            </style>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkButton" id="welcome_open_button">
-                            <property name="label" translatable="yes">Open File</property>
-                            <accessibility>
-                              <property name="label" translatable="yes">Open existing file</property>
-                              <property name="description" translatable="yes">Open an existing markdown file from disk</property>
-                            </accessibility>
-                            <style>
-                              <class name="pill"/>
-                              <class name="suggested-action"/>
-                            </style>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                  </object>
-                </property>
+              <object class="GtkLabel" id="save_status">
+                <property name="label"></property>
+                <property name="halign">start</property>
+                <property name="width-chars">20</property>
+                <property name="max-width-chars">30</property>
+                <property name="ellipsize">end</property>
               </object>
             </child>
+
             <child>
-              <object class="GtkStackPage">
-                <property name="name">editor</property>
-                <property name="title">Editor</property>
-                <property name="child">
-                  <object class="GtkBox">
-                    <property name="orientation">vertical</property>
-                    <property name="hexpand">true</property>
-                    <property name="vexpand">true</property>
-                    <child>
-                      <object class="GtkBox" id="toolbar_container">
-                        <property name="orientation">horizontal</property>
-                        <property name="spacing">2</property>
-                        <style>
-                          <class name="toolbar"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkScrolledWindow">
-                        <property name="hexpand">true</property>
-                        <property name="vexpand">true</property>
-                        <child>
-                          <object class="GtkTextView" id="text_view">
-                            <property name="wrap-mode">word</property>
-                            <property name="left-margin">12</property>
-                            <property name="right-margin">12</property>
-                            <property name="top-margin">12</property>
-                            <property name="bottom-margin">12</property>
-                            <accessibility>
-                              <property name="label" translatable="yes">Markdown editor</property>
-                              <property name="description" translatable="yes">Main text editor for writing and editing markdown content</property>
-                            </accessibility>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkBox" id="statusbar">
-                        <property name="orientation">horizontal</property>
-                        <property name="spacing">6</property>
-                        <property name="margin-start">12</property>
-                        <property name="margin-end">12</property>
-                        <property name="margin-top">3</property>
-                        <property name="margin-bottom">3</property>
-                        <accessibility>
-                          <property name="label" translatable="yes">Status bar</property>
-                          <property name="description" translatable="yes">Shows document save status and file location</property>
-                        </accessibility>
-                        <child>
-                          <object class="GtkLabel" id="save_status">
-                            <property name="label">Saved</property>
-                            <property name="xalign">0</property>
-                            <accessibility>
-                              <property name="label" translatable="yes">Save status</property>
-                              <property name="description" translatable="yes">Current save status of the document</property>
-                            </accessibility>
-                            <style>
-                              <class name="dim-label"/>
-                            </style>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkLabel" id="file_location">
-                            <property name="xalign">1</property>
-                            <property name="hexpand">true</property>
-                            <property name="ellipsize">start</property>
-                            <accessibility>
-                              <property name="label" translatable="yes">File location</property>
-                              <property name="description" translatable="yes">Current file path or document name</property>
-                            </accessibility>
-                            <style>
-                              <class name="dim-label"/>
-                            </style>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                  </object>
-                </property>
+              <object class="GtkSeparator">
+                <property name="orientation">vertical</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkLabel" id="file_location">
+                <property name="label"></property>
+                <property name="halign">start</property>
+                <property name="hexpand">true</property>
+                <property name="ellipsize">middle</property>
+                <property name="width-chars">30</property>
+                <property name="max-width-chars">50</property>
               </object>
             </child>
           </object>
