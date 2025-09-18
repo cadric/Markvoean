@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Multi-document tab management for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.1] - 2025-09-18 - ui/tab_manager.c
-   FIXED: UnsavedChangesContext memory leak + global accessor back-references
+   [1.2.0] - 2025-09-18 - ui/tab_manager.c
+   MINOR: Implemented proper GTK4 context menu with tab management actions
 */
 
 #ifdef HAVE_CONFIG_H
@@ -18,6 +18,7 @@
 #include <gtktext/ui/file_actions.h>
 #include <gtktext/components/toolbar.h>
 #include <gtktext/ui/status_manager.h>
+#include <gtktext/core/signal_manager.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Private implementation details
@@ -30,6 +31,7 @@ typedef struct _TabManagerPrivate {
     GHashTable *tab_documents;  /* AdwTabPage -> TabDocument */
     AdwTabPage *active_page;
     gboolean initialized;
+    GSimpleActionGroup *tab_action_group;  /* Keep action group alive */
 } TabManagerPrivate;
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -43,6 +45,8 @@ struct _TabManager {
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HELPERS - Internal utility functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Forward declarations removed - using AdwTabView built-in menu system */
 
 /* Forward declarations */
 static void on_tab_view_page_detached(AdwTabView *tab_view, AdwTabPage *page, gint position, gpointer user_data);
@@ -418,12 +422,15 @@ static gboolean on_tab_view_close_page(AdwTabView *tab_view, AdwTabPage *page, g
 
     /* Phase 3: Check for unsaved changes and show confirmation dialog */
     if (tab_doc && tab_document_get_modified(tab_doc)) {
-        g_debug("Document has unsaved changes, showing dialog");
-    show_unsaved_changes_dialog(tm, tab_view, page, tab_doc);
+        const char *doc_title = tab_document_get_display_title(tab_doc);
+        g_message("🔥 UNSAVED CHANGES DETECTED: Document '%s' has unsaved changes - showing save dialog",
+                 doc_title ? doc_title : "Untitled");
+        show_unsaved_changes_dialog(tm, tab_view, page, tab_doc);
         return GDK_EVENT_STOP; /* Don't call close_page_finish yet - dialog will handle it */
     } else {
-        /* No unsaved changes, allow close */
-        g_debug("No unsaved changes, allowing close");
+        const char *doc_title = tab_doc ? tab_document_get_display_title(tab_doc) : "None";
+        g_message("✅ NO UNSAVED CHANGES: Document '%s' is clean - allowing close without dialog",
+                 doc_title);
         safe_close_page_finish(tab_view, page, TRUE);
         return GDK_EVENT_STOP;
     }
@@ -485,22 +492,91 @@ static void on_tab_document_dirty_state_changed(TabDocument *td, gboolean is_dir
     g_warning("TabDocument not found in tab manager hash table");
 }
 
-/* Phase 4: Right-click context menu handler - simplified for now */
-static void on_tab_view_right_click(GtkGestureClick *gesture G_GNUC_UNUSED, gint n_press G_GNUC_UNUSED,
-                                   gdouble x G_GNUC_UNUSED, gdouble y G_GNUC_UNUSED, gpointer user_data)
+/* Old context menu action handlers removed - using new AdwTabView-based handlers */
+
+/* New action handlers for AdwTabView built-in context menu */
+static void on_tab_action_close(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     TabManager *tm = (TabManager *)user_data;
+    if (!tm || !tm->priv) return;
 
-    /* Get the clicked tab page */
-    AdwTabPage *page = adw_tab_view_get_selected_page(tm->priv->tab_view);
-    if (!page) return;
-
-    /* For now, just show debug message - full context menu implementation needs more complex GTK4 setup */
-    g_debug("Tab right-clicked - context menu would appear here");
-
-    /* TODO: Implement proper context menu with GTK4 APIs */
-    /* This would require more complex popover setup that's GTK4-compatible */
+    /* Get the target page from the stored data */
+    AdwTabPage *page = g_object_get_data(G_OBJECT(tm->priv->tab_view), "context-menu-target-page");
+    if (page) {
+        g_message("🎯 CONTEXT MENU: Close Tab action triggered - will check for unsaved changes");
+        tab_manager_close_tab(tm, page);
+    }
 }
+
+static void on_tab_action_close_others(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
+{
+    TabManager *tm = (TabManager *)user_data;
+    if (!tm || !tm->priv) return;
+
+    /* Get the target page from the stored data */
+    AdwTabPage *target_page = g_object_get_data(G_OBJECT(tm->priv->tab_view), "context-menu-target-page");
+    if (!target_page) return;
+
+    g_debug("Context menu action: Close Other Tabs");
+
+    /* Collect pages to close (all except target) */
+    GList *pages_to_close = NULL;
+    gint n_pages = adw_tab_view_get_n_pages(tm->priv->tab_view);
+    for (gint i = 0; i < n_pages; i++) {
+        AdwTabPage *page = adw_tab_view_get_nth_page(tm->priv->tab_view, i);
+        if (page != target_page) {
+            pages_to_close = g_list_prepend(pages_to_close, page);
+        }
+    }
+
+    /* Close collected pages */
+    for (GList *l = pages_to_close; l != NULL; l = l->next) {
+        tab_manager_close_tab(tm, ADW_TAB_PAGE(l->data));
+    }
+    g_list_free(pages_to_close);
+}
+
+static void on_tab_action_close_all(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
+{
+    TabManager *tm = (TabManager *)user_data;
+    if (tm) {
+        g_debug("Context menu action: Close All Tabs");
+        tab_manager_close_all_tabs(tm);
+    }
+}
+
+/* AdwTabView setup-menu signal handler - called when context menu is about to be shown */
+static void on_tab_view_setup_menu(AdwTabView *tab_view, AdwTabPage *page, gpointer user_data)
+{
+    g_debug("setup-menu signal triggered for tab page");
+    TabManager *tm = (TabManager *)user_data;
+
+    /* Store the target page for actions to use */
+    g_object_set_data(G_OBJECT(tab_view), "context-menu-target-page", page);
+
+    /* Here we could customize the menu based on the specific tab */
+    gint n_pages = adw_tab_view_get_n_pages(tab_view);
+    g_debug("Setting up context menu for tab (total pages: %d)", n_pages);
+
+    /* Check if actions are available using TabManager reference */
+    if (tm && tm->priv && tm->priv->tab_action_group) {
+        GActionGroup *action_group = G_ACTION_GROUP(tm->priv->tab_action_group);
+        g_debug("Found 'tab' action group from TabManager");
+        gboolean close_enabled = g_action_group_get_action_enabled(action_group, "close");
+        gboolean close_others_enabled = g_action_group_get_action_enabled(action_group, "close-others");
+        gboolean close_all_enabled = g_action_group_get_action_enabled(action_group, "close-all");
+        g_debug("Action states: close=%s, close-others=%s, close-all=%s",
+                close_enabled ? "enabled" : "disabled",
+                close_others_enabled ? "enabled" : "disabled",
+                close_all_enabled ? "enabled" : "disabled");
+    } else {
+        g_warning("TabManager or action group not available in setup-menu!");
+    }
+
+    (void)tm; /* Store tm for potential future use */
+}
+
+/* Old gesture-based approach removed - using AdwTabView built-in menu-model property instead */
 
 /* Phase 4: Keyboard navigation between tabs */
 static gboolean on_tab_view_key_pressed(GtkEventControllerKey *controller G_GNUC_UNUSED, guint keyval, guint keycode,
@@ -581,13 +657,68 @@ TabManager *tab_manager_new(AdwTabView *tab_view, AdwTabBar *tab_bar, GtkApplica
                     G_CALLBACK(on_tab_view_key_pressed), tm);
     gtk_widget_add_controller(GTK_WIDGET(tab_view), key_controller);
 
-    /* Phase 4: Add right-click context menu for tabs */
-    GtkGesture *click_gesture = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click_gesture), GDK_BUTTON_SECONDARY);
-    g_signal_connect(click_gesture, "pressed", G_CALLBACK(on_tab_view_right_click), tm);
-    gtk_widget_add_controller(GTK_WIDGET(tab_bar), GTK_EVENT_CONTROLLER(click_gesture));
+    /* Phase 4: Create action group for tab actions FIRST */
+    tm->priv->tab_action_group = g_simple_action_group_new();
 
-    g_debug("TabManager created");
+    /* Create tab actions using stateless actions (no parameters) */
+    GSimpleAction *close_action = g_simple_action_new("close", NULL);
+    g_signal_connect(close_action, "activate", G_CALLBACK(on_tab_action_close), tm);
+    g_action_map_add_action(G_ACTION_MAP(tm->priv->tab_action_group), G_ACTION(close_action));
+    g_debug("Added tab.close action");
+
+    GSimpleAction *close_others_action = g_simple_action_new("close-others", NULL);
+    g_signal_connect(close_others_action, "activate", G_CALLBACK(on_tab_action_close_others), tm);
+    g_action_map_add_action(G_ACTION_MAP(tm->priv->tab_action_group), G_ACTION(close_others_action));
+    g_debug("Added tab.close-others action");
+
+    GSimpleAction *close_all_action = g_simple_action_new("close-all", NULL);
+    g_signal_connect(close_all_action, "activate", G_CALLBACK(on_tab_action_close_all), tm);
+    g_action_map_add_action(G_ACTION_MAP(tm->priv->tab_action_group), G_ACTION(close_all_action));
+    g_debug("Added tab.close-all action");
+
+    /* Add a test action directly to the application for debugging */
+    GSimpleAction *test_action = g_simple_action_new("test-tab-action", NULL);
+    g_signal_connect(test_action, "activate", G_CALLBACK(on_tab_action_close), tm);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(test_action));
+    g_debug("Added app.test-tab-action for debugging");
+
+    /* Actions are enabled by default in GTK4, but let's verify */
+    gboolean close_enabled = g_action_get_enabled(G_ACTION(close_action));
+    gboolean close_others_enabled = g_action_get_enabled(G_ACTION(close_others_action));
+    gboolean close_all_enabled = g_action_get_enabled(G_ACTION(close_all_action));
+    g_debug("Action states after creation: close=%s, close-others=%s, close-all=%s",
+            close_enabled ? "enabled" : "disabled",
+            close_others_enabled ? "enabled" : "disabled",
+            close_all_enabled ? "enabled" : "disabled");
+
+    /* Insert action group into tab view widget */
+    gtk_widget_insert_action_group(GTK_WIDGET(tab_view), "tab", G_ACTION_GROUP(tm->priv->tab_action_group));
+    g_debug("Inserted action group 'tab' into tab_view widget");
+
+    /* Also try inserting into the application for wider scope */
+    gtk_widget_insert_action_group(GTK_WIDGET(gtk_application_get_active_window(app)), "tab", G_ACTION_GROUP(tm->priv->tab_action_group));
+    g_debug("Also inserted action group 'tab' into main window");
+
+    /* Now create the menu model AFTER actions are created and inserted */
+    GMenu *tab_context_menu = g_menu_new();
+    g_menu_append(tab_context_menu, _("Close Tab"), "tab.close");
+    g_menu_append(tab_context_menu, _("Close Other Tabs"), "tab.close-others");
+    g_menu_append(tab_context_menu, _("Close All Tabs"), "tab.close-all");
+
+    /* Set the menu model on the tab view - this enables right-click context menus */
+    adw_tab_view_set_menu_model(tab_view, G_MENU_MODEL(tab_context_menu));
+    g_debug("Set menu model on tab_view");
+
+    /* Connect to setup-menu signal for dynamic menu customization */
+    g_signal_connect(tab_view, "setup-menu", G_CALLBACK(on_tab_view_setup_menu), tm);
+    g_debug("Connected setup-menu signal");
+
+    g_object_unref(tab_context_menu);
+    /* Don't unref action group - keep it alive in tm->priv->tab_action_group */
+
+    g_debug("TabManager created with tab_view: %s, tab_bar: %s",
+            G_OBJECT_TYPE_NAME(tab_view), G_OBJECT_TYPE_NAME(tab_bar));
+    g_debug("Right-click gesture controllers added to tab_bar");
     return tm;
 }
 
@@ -625,7 +756,13 @@ void tab_manager_destroy(TabManager *tm)
             tm->priv->tab_documents = NULL; /* Explicitly null the pointer */
         }
 
-        /* Step 4: Clear app/view back-references */
+        /* Step 4: Clean up action group */
+        if (tm->priv->tab_action_group) {
+            g_object_unref(tm->priv->tab_action_group);
+            tm->priv->tab_action_group = NULL;
+        }
+
+        /* Step 5: Clear app/view back-references */
         if (tm->priv->app) {
             g_object_set_data(G_OBJECT(tm->priv->app), "tab_manager", NULL);
         }
@@ -858,6 +995,61 @@ gboolean tab_manager_has_unsaved_changes(TabManager *tm, AdwTabPage *page)
 {
     TabDocument *tab_doc = tab_manager_get_tab_document(tm, page);
     return tab_doc ? tab_document_get_modified(tab_doc) : FALSE;
+}
+
+gboolean tab_manager_has_any_unsaved_changes(TabManager *tm)
+{
+    g_return_val_if_fail(tm != NULL, FALSE);
+    g_return_val_if_fail(tm->priv != NULL, FALSE);
+
+    /* Iterate through all pages and check for unsaved changes */
+    gint n_pages = adw_tab_view_get_n_pages(tm->priv->tab_view);
+    for (gint i = 0; i < n_pages; i++) {
+        AdwTabPage *page = adw_tab_view_get_nth_page(tm->priv->tab_view, i);
+        if (tab_manager_has_unsaved_changes(tm, page)) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+AdwTabPage *tab_manager_get_first_unsaved_tab(TabManager *tm)
+{
+    g_return_val_if_fail(tm != NULL, NULL);
+    g_return_val_if_fail(tm->priv != NULL, NULL);
+
+    /* Find first tab with unsaved changes */
+    gint n_pages = adw_tab_view_get_n_pages(tm->priv->tab_view);
+    for (gint i = 0; i < n_pages; i++) {
+        AdwTabPage *page = adw_tab_view_get_nth_page(tm->priv->tab_view, i);
+        if (tab_manager_has_unsaved_changes(tm, page)) {
+            return page;
+        }
+    }
+    return NULL;
+}
+
+void tab_manager_cleanup_all_signals(TabManager *tm)
+{
+    g_return_if_fail(tm != NULL);
+    g_return_if_fail(tm->priv != NULL);
+
+    /* Clean up signal connections for all tabs */
+    SignalManager *sm = gtktext_get_signal_manager();
+    if (sm) {
+        g_debug("tab_manager_cleanup_all_signals: disconnecting signals for all tabs");
+        gint n_pages = adw_tab_view_get_n_pages(tm->priv->tab_view);
+        for (gint i = 0; i < n_pages; i++) {
+            AdwTabPage *page = adw_tab_view_get_nth_page(tm->priv->tab_view, i);
+            GtkWidget *text_view = tab_manager_get_text_view(tm, page);
+            if (text_view) {
+                GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+                if (buffer) {
+                    signal_manager_disconnect_buffer_changed(sm, buffer);
+                }
+            }
+        }
+    }
 }
 
 gint tab_manager_get_tab_count(TabManager *tm)

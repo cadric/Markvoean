@@ -1,0 +1,19 @@
+# [1.3.3] - 2025-09-18 - data/org.gtk.gtktext.desktop.in
+# Changed: Enhanced with modern GNOME features and proper application ID
+[Desktop Entry]
+Type=Application
+Name=GTKText
+GenericName=Text Editor
+Comment=Modern markdown editor with live preview
+Icon=org.gtk.gtktext
+Exec=gtktext %F
+Terminal=false
+Categories=Office;TextEditor;Utility;
+Keywords=Markdown;Text;Editor;Writing;Preview;Syntax;Document;
+MimeType=text/markdown;text/x-markdown;text/plain;
+StartupNotify=true
+StartupWMClass=org.gtk.gtktext
+DBusActivatable=false
+SingleMainWindow=false
+X-GNOME-UsesNotifications=false
+X-GNOME-SingleWindow=false

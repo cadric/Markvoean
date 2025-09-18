@@ -1,8 +1,8 @@
-# [1.3.1] - 2025-09-17 - meson.build
-# Fixed: Phase 5 critical issues - restored toolbar/status bar, fixed GObject errors, improved close workflow
+# [1.3.3] - 2025-09-18 - meson.build
+# Changed: Enhanced GNOME compliance - AppStream metadata, application ID consistency, modern desktop file
 
 project('gtktext', 'c',
-  version: '1.3.2',
+  version: '1.3.3',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

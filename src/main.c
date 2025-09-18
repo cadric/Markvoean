@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
     g_autoptr(AdwApplication) app = NULL;
     int status;
 
-    app = adw_application_new("com.example.MiniTextEditor", G_APPLICATION_HANDLES_OPEN);
+    app = adw_application_new("org.gtk.gtktext", G_APPLICATION_HANDLES_OPEN);
 
     const GActionEntry app_actions[] = {
         { "new-tab", tab_integration_new_tab_action, NULL, NULL, NULL, {0} },

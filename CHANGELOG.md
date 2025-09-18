@@ -17,6 +17,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [1.3.3] - 2025-09-18
+
+### Added
+- **🛡️ CRITICAL: Universal Save Confirmation System** - Comprehensive data loss prevention across ALL tab closure methods
+  - Save dialog now appears for ANY modified tab regardless of closure method:
+    - Tab X button click
+    - Context menu "Close Tab", "Close Other Tabs", "Close All Tabs"
+    - Ctrl+W keyboard shortcut
+    - Window close button (checks ALL tabs)
+  - Enhanced debugging with visual indicators for save dialog triggers
+  - Prevents accidental data loss through consistent save confirmation flow
+- **🏪 GNOME SOFTWARE COMPLIANCE** - Complete AppStream metadata for software center listing
+  - Added `org.gtk.gtktext.metainfo.xml` with comprehensive application metadata
+  - Proper categorization, keywords, and content rating for software centers
+  - Release history with detailed changelogs for user visibility
+  - Full AppStream 1.0 specification compliance
+- **📱 MODERN DESKTOP INTEGRATION** - Enhanced desktop file with GNOME HIG compliance
+  - Migrated to proper reverse-DNS application ID: `org.gtk.gtktext`
+  - Added MIME type associations for markdown files (`text/markdown`, `text/x-markdown`)
+  - Enhanced desktop entry with `StartupWMClass`, modern categories, and accessibility
+  - Comprehensive keyword set for improved application discovery
+
+### Enhanced
+- **🔧 BUILD SYSTEM MODERNIZATION** - Advanced validation and compliance checks
+  - Added automated AppStream metainfo validation with `appstreamcli`
+  - Desktop file validation with `desktop-file-validate` in test suite
+  - Enhanced icon system with scalable and symbolic variants
+  - Proper hicolor theme compliance with multiple icon formats
+- **📋 DEVELOPMENT WORKFLOW** - Updated CLAUDE.md with modern GNOME requirements
+  - AppStream metainfo update requirements in release workflow
+  - Application ID consistency checks in review checklist
+  - Enhanced packaging guidelines for GNOME compliance
+
+### Technical
+- Verified all tab closure paths route through `on_tab_view_close_page` signal handler
+- Added comprehensive debug logging with emoji indicators for save dialog events
+- Enhanced `tab_document_get_modified()` validation across all closure scenarios
+- Improved window close handler to check unsaved changes across ALL tabs simultaneously
+- Standardized application ID to `org.gtk.gtktext` across all components
+- Enhanced icon installation with proper naming conventions and symbolic variants
+
 ## [1.3.2] - 2025-09-17
 
 ### Fixed

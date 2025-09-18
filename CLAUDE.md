@@ -33,7 +33,7 @@
 
 **Artifacts per change**
 
-1. Update `meson.build` version. 2) Update `CHANGELOG.md` (date + SemVer). 3) Per‑file header note. 4) If schemas: bump, recompile, note migration. 5) If UI changed: short before/after note or screenshot link.
+1. Update `meson.build` version. 2) Update `CHANGELOG.md` (date + SemVer). 3) Per‑file header note. 4) If schemas: bump, recompile, note migration. 5) If UI changed: short before/after note or screenshot link. 6) If new features: update AppStream metainfo.xml releases section.
 
 **Commit style**: Conventional Commits (`feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`). Imperative, ≤72 chars.
 
@@ -161,7 +161,7 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 ---
 ## 📦 Packaging & Releases
 
-1. Clean build, no warnings, tests pass. 2) Update AppStream notes and desktop file if needed. 3) Validate with `appstream‑cli`; verify icons/categories. 4) Tag and publish; attach Flatpak bundle or source tarball.
+1. Clean build, no warnings, tests pass. 2) Update AppStream metainfo.xml and desktop file if needed. 3) Validate with `appstream‑cli` and `desktop-file-validate`; verify icons/categories. 4) Ensure consistent reverse-DNS application ID across all files. 5) Tag and publish; attach Flatpak bundle or source tarball.
 ---
 ## ✅ MR/PR Review Checklist
 
@@ -169,6 +169,8 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 - No main‑loop blocking; no new global mutable state.
 - Shortcuts present and discoverable.
 - i18n + accessibility verified.
+- AppStream metainfo.xml and desktop file validation pass.
+- Consistent reverse-DNS application ID across all files.
 - Hardening flags intact; no new warnings; tests pass; no leaks.
 - Docs + changelog updated for user‑visible changes.
 ---

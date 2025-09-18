@@ -81,6 +81,7 @@ void tab_integration_close_tab_action(GSimpleAction *action G_GNUC_UNUSED,
     if (tm) {
         AdwTabPage *active = tab_manager_get_active_tab(tm);
         if (active) {
+            g_message("⌨️ KEYBOARD SHORTCUT: Ctrl+W pressed - will check for unsaved changes");
             tab_manager_close_tab(tm, active);
         }
     }

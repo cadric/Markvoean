@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Window and application lifecycle management for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.1] - 2025-09-16 - core/window_lifecycle.c
-   Changed: Extracted window lifecycle management from main.c for better organization
+   [1.1.0] - 2025-09-18 - core/window_lifecycle.c
+   MAJOR: Fixed critical data loss - window close now checks ALL tabs for unsaved changes
 */
 
 #ifdef HAVE_CONFIG_H
@@ -20,6 +20,7 @@
 #include <gtktext/document/document_manager.h>
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/editor/buffer_manager.h>
+#include <gtktext/ui/tab_manager.h>
 
 #ifdef HAVE_LIBSOUP
 #include <libsoup/soup.h>
@@ -31,6 +32,7 @@
 
 gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer user_data)
 {
+    (void)user_data; /* Parameter required for signal signature but unused */
     /* Check if we're closing without dialog (to prevent recursion) */
     gpointer closing_flag = g_object_get_data(G_OBJECT(window), "closing-without-dialog");
     if (closing_flag) {
@@ -38,25 +40,34 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
         return FALSE; /* Allow close */
     }
 
-    if (!user_data) {
-        g_warning("window_lifecycle_on_window_close_request: Invalid text_view (user_data).");
+    g_debug("window_lifecycle_on_window_close_request: checking for unsaved changes across all tabs");
+
+    /* Get the tab manager from the application */
+    GtkApplication *app = gtk_window_get_application(window);
+    TabManager *tab_manager = gtktext_get_tab_manager(app);
+
+    if (!tab_manager) {
+        g_warning("window_lifecycle_on_window_close_request: Failed to get tab manager");
         return FALSE;
     }
-    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
 
-    if (!buffer) {
-        g_warning("window_lifecycle_on_window_close_request: Failed to get valid buffer from text_view.");
-        return FALSE;
-    }
+    /* Check if ANY tab has unsaved changes */
+    if (tab_manager_has_any_unsaved_changes(tab_manager)) {
+        g_message("Unsaved changes detected in one or more tabs, showing close confirmation dialog");
 
-    g_debug("window_lifecycle_on_window_close_request: checking for unsaved changes");
-
-    /* Check if there are unsaved changes */
-    if (buffer_manager_has_unsaved_changes(buffer)) {
-        g_message("Unsaved changes detected, showing save dialog");
-        dialogs_show_unsaved_changes_dialog(window, buffer);
-        return TRUE; /* Prevent close until user decides */
+        /* Get first tab with unsaved changes for the dialog */
+        AdwTabPage *page = tab_manager_get_first_unsaved_tab(tab_manager);
+        if (page) {
+            GtkWidget *text_view = tab_manager_get_text_view(tab_manager, page);
+            if (text_view) {
+                GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+                if (buffer) {
+                    dialogs_show_unsaved_changes_dialog(window, buffer);
+                    return TRUE; /* Prevent close until user decides */
+                }
+            }
+        }
+        return TRUE; /* Prevent close as fallback */
     }
 
     g_debug("window_lifecycle_on_window_close_request: no unsaved changes, proceeding with close");
@@ -67,12 +78,8 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
         window_size_manager_save_state(window, settings);
     }
 
-    /* Clean up signal connections through proper signal manager */
-    SignalManager *sm = gtktext_get_signal_manager();
-    if (sm) {
-        g_debug("window_lifecycle_on_window_close_request: disconnecting buffer signals");
-        signal_manager_disconnect_buffer_changed(sm, buffer);
-    }
+    /* Clean up signal connections for all tabs */
+    tab_manager_cleanup_all_signals(tab_manager);
 
     return FALSE; /* Allow close */
 }

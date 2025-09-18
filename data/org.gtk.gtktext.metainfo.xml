@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- [1.3.3] - 2025-09-18 - data/org.gtk.gtktext.metainfo.xml
+     Added: AppStream metadata for GNOME Software compliance
+-->
+<component type="desktop-application">
+  <id>org.gtk.gtktext</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>GTKText</name>
+  <summary>Modern markdown editor with live preview</summary>
+  <description>
+    <p>
+      GTKText is a simple yet powerful markdown editor built with GTK4 and libadwaita.
+      It provides a clean, distraction-free writing environment with real-time markdown
+      rendering and syntax highlighting.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Live markdown preview with syntax highlighting</li>
+      <li>Multi-document tabs for efficient workflow</li>
+      <li>Automatic save to prevent data loss</li>
+      <li>GNOME HIG-compliant adaptive interface</li>
+      <li>Keyboard shortcuts for fast editing</li>
+      <li>HTTP image loading support</li>
+      <li>Modern Wayland-native design</li>
+    </ul>
+    <p>
+      Perfect for developers, writers, and anyone who works with markdown documents.
+      GTKText follows GNOME design principles and integrates seamlessly with your
+      desktop environment.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.gtk.gtktext.desktop</launchable>
+  <provides>
+    <binary>gtktext</binary>
+  </provides>
+
+  <!-- Screenshots will be added when available -->
+  <!--
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main editing interface with live markdown preview</caption>
+      <image>https://example.com/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  -->
+
+  <url type="homepage">https://github.com/example/gtktext</url>
+  <url type="bugtracker">https://github.com/example/gtktext/issues</url>
+  <!-- TODO: Update with actual URLs when available -->
+
+  <categories>
+    <category>Office</category>
+    <category>TextEditor</category>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>markdown</keyword>
+    <keyword>editor</keyword>
+    <keyword>text</keyword>
+    <keyword>writing</keyword>
+    <keyword>preview</keyword>
+    <keyword>syntax</keyword>
+  </keywords>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+    <internet>offline-only</internet>
+  </requires>
+
+  <recommends>
+    <display_length compare="ge">768</display_length>
+  </recommends>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="1.3.3" date="2025-09-18">
+      <description>
+        <p>Critical data protection and GNOME compliance improvements:</p>
+        <ul>
+          <li>Universal save confirmation dialog for ALL tab closure methods</li>
+          <li>Enhanced tab context menu with proper AdwTabView integration</li>
+          <li>Comprehensive AppStream metadata for software center listing</li>
+          <li>Improved GNOME HIG compliance across all components</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.2" date="2025-09-17">
+      <description>
+        <p>Stability and workflow improvements:</p>
+        <ul>
+          <li>Fixed segfault when closing tabs due to signal handler issues</li>
+          <li>Improved tab close/detach workflow stability</li>
+          <li>Enhanced error handling and defensive programming</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.3.1" date="2025-09-17">
+      <description>
+        <p>Major architecture and interface improvements:</p>
+        <ul>
+          <li>Complete modularization from 2829-line main.c to focused components</li>
+          <li>Multi-document tab support with proper save workflows</li>
+          <li>GNOME HIG-compliant adaptive layout system</li>
+          <li>Enhanced accessibility and keyboard navigation</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <developer id="org.gtk.gtktext">
+    <name>GTKText Development Team</name>
+  </developer>
+  <update_contact>noreply@example.com</update_contact>
+  <!-- TODO: Update with actual contact when available -->
+
+  <translation type="gettext">gtktext</translation>
+
+  <!-- Compliance with GNOME Software requirements -->
+  <custom>
+    <value key="GnomeSoftware::key-colors">[(52, 101, 164)]</value>
+  </custom>
+</component>
