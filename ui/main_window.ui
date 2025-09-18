@@ -52,7 +52,7 @@
                     </accessibility>
                   </object>
                 </child>
-                <!-- Save As button - hidden on narrow screens -->
+                <!-- Save As button - hidden on narrow screens with display:none -->
                 <child>
                   <object class="GtkButton" id="save_as_button">
                     <property name="icon-name">document-save-as-symbolic</property>

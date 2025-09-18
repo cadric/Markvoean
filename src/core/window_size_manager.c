@@ -1,7 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
-   Purpose: GNOME HIG-compliant window sizing with persistence
+   Purpose: GTK4 + libadwaita window sizing with GSettings persistence and adaptivity
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.0] - 2025-09-18 - core/window_size_manager.c
+   [1.1.0] - 2025-09-18 - core/window_size_manager.c
+   MAJOR: Proper GTK4 GSettings binding approach with monitor workarea validation
 */
 
 #ifdef HAVE_CONFIG_H
@@ -17,254 +18,262 @@
  * CONSTANTS - GNOME HIG sizing requirements
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-/* GNOME HIG minimum sizes */
-#define MIN_WINDOW_WIDTH 600    /* Minimum usable width */
-#define MIN_WINDOW_HEIGHT 400   /* Minimum usable height */
-#define HIG_TARGET_WIDTH 1024   /* HIG target minimum */
-#define HIG_TARGET_HEIGHT 600   /* HIG target minimum */
-
-/* Default sizes for content-appropriate initial sizing */
-#define DEFAULT_WINDOW_WIDTH 900   /* Good for markdown editing */
-#define DEFAULT_WINDOW_HEIGHT 700  /* Sufficient for document + UI */
-
-/* Narrow layout breakpoint (similar to libadwaita patterns) */
-#define NARROW_LAYOUT_THRESHOLD 800
+#define MIN_WINDOW_WIDTH        600
+#define MIN_WINDOW_HEIGHT       400
+#define DEFAULT_WINDOW_WIDTH    900
+#define DEFAULT_WINDOW_HEIGHT   700
+#define MAX_WINDOW_WIDTH        3840
+#define MAX_WINDOW_HEIGHT       2160
+#define NARROW_LAYOUT_THRESHOLD 800  /* tune to your UI */
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HELPERS - Size constraint and validation functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-static void clamp_window_size(gint *width, gint *height)
-{
-    g_return_if_fail(width != NULL && height != NULL);
+/* Forward declarations */
+static GtkWidget *find_widget_by_name(GtkWidget *parent, const char *name);
 
-    /* Clamp to minimum GNOME HIG requirements */
-    if (*width < MIN_WINDOW_WIDTH) {
-        g_debug("Clamping window width from %d to minimum %d", *width, MIN_WINDOW_WIDTH);
-        *width = MIN_WINDOW_WIDTH;
-    }
-
-    if (*height < MIN_WINDOW_HEIGHT) {
-        g_debug("Clamping window height from %d to minimum %d", *height, MIN_WINDOW_HEIGHT);
-        *height = MIN_WINDOW_HEIGHT;
-    }
-
-    /* Reasonable maximum limits to prevent unusable windows */
-    if (*width > 3840) *width = 3840;  /* 4K width */
-    if (*height > 2160) *height = 2160; /* 4K height */
+/* clamp to HIG and hard caps */
+static inline void clamp_window_size(gint *w, gint *h) {
+    if (!w || !h) return;
+    if (*w < MIN_WINDOW_WIDTH)  *w = MIN_WINDOW_WIDTH;
+    if (*h < MIN_WINDOW_HEIGHT) *h = MIN_WINDOW_HEIGHT;
+    if (*w > MAX_WINDOW_WIDTH)  *w = MAX_WINDOW_WIDTH;
+    if (*h > MAX_WINDOW_HEIGHT) *h = MAX_WINDOW_HEIGHT;
 }
 
-static gboolean is_size_valid_for_display(gint width, gint height, GdkDisplay *display)
-{
-    g_return_val_if_fail(GDK_IS_DISPLAY(display), FALSE);
+/* clamp to current monitor geometry (Wayland/X11 safe) */
+static void clamp_to_workarea(GtkWindow *window, gint *w, gint *h) {
+    if (!GTK_IS_WINDOW(window) || !w || !h) return;
 
-    /* Get the primary monitor to validate against screen size */
-    GListModel *monitors = gdk_display_get_monitors(display);
-    guint n_monitors = g_list_model_get_n_items(monitors);
+    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(window));
+    if (!GDK_IS_DISPLAY(display)) return;
 
-    if (n_monitors == 0) {
-        g_warning("No monitors found, using default validation");
-        return (width >= MIN_WINDOW_WIDTH && height >= MIN_WINDOW_HEIGHT);
-    }
+    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window));
+    if (!surface) return;
 
-    /* Check against primary monitor */
-    GdkMonitor *monitor = g_list_model_get_item(monitors, 0);
-    if (!monitor) return FALSE;
+    GdkMonitor *monitor = gdk_display_get_monitor_at_surface(display, surface);
+    if (!monitor) return;
 
     GdkRectangle geometry;
     gdk_monitor_get_geometry(monitor, &geometry);
-    g_object_unref(monitor);
 
-    /* Window should not exceed 90% of screen size */
-    gint max_width = (gint)(geometry.width * 0.9);
-    gint max_height = (gint)(geometry.height * 0.9);
+    /* Use 90% of monitor size as reasonable maximum */
+    gint max_w = (gint)(geometry.width * 0.9);
+    gint max_h = (gint)(geometry.height * 0.9);
 
-    return (width <= max_width && height <= max_height &&
-            width >= MIN_WINDOW_WIDTH && height >= MIN_WINDOW_HEIGHT);
+    if (*w > max_w) *w = max_w;
+    if (*h > max_h) *h = max_h;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════
- * ADAPTIVE LAYOUT - Responsive behavior management
- * ═══════════════════════════════════════════════════════════════════════════════ */
+/* Global state to track save-as button and its parent for layout-shift-free hiding */
+static struct {
+    GtkWidget *save_as_button;
+    GtkWidget *parent_container;
+    gint position_in_parent;
+    gboolean is_detached;
+    gboolean last_narrow_state;
+} button_state = {NULL, NULL, -1, FALSE, FALSE};
 
-static void update_adaptive_classes(GtkWindow *window)
-{
-    g_return_if_fail(GTK_IS_WINDOW(window));
+/* adaptive layout toggle with no-layout-shift widget management */
+static void update_adaptive_classes(GtkWindow *window) {
+    GtkWidget *w = GTK_WIDGET(window);
+    const int alloc_w = gtk_widget_get_width(w);
+    const gboolean is_narrow = alloc_w < NARROW_LAYOUT_THRESHOLD;
 
-    GtkWidget *widget = GTK_WIDGET(window);
-    gint width, height;
-    gtk_window_get_default_size(window, &width, &height);
-
-    /* Apply narrow layout class based on width */
-    if (width < NARROW_LAYOUT_THRESHOLD) {
-        gtk_widget_add_css_class(widget, "narrow-layout");
-        g_debug("Applied narrow layout for width: %d", width);
+    if (is_narrow) {
+        gtk_widget_add_css_class(w, "narrow-layout");
     } else {
-        gtk_widget_remove_css_class(widget, "narrow-layout");
-        g_debug("Removed narrow layout for width: %d", width);
+        gtk_widget_remove_css_class(w, "narrow-layout");
     }
 
-    /* Traverse widget tree to find adaptive elements - simplified approach */
-    GtkWidget *toolbar_view = gtk_widget_get_first_child(widget);
-    if (toolbar_view && ADW_IS_TOOLBAR_VIEW(toolbar_view)) {
-        /* Apply adaptive behavior through CSS classes */
-        if (width < NARROW_LAYOUT_THRESHOLD) {
-            g_debug("Applying narrow layout adaptations");
-        } else {
-            g_debug("Removing narrow layout adaptations");
+    /* Only perform widget operations if narrow state changed */
+    if (button_state.last_narrow_state != is_narrow) {
+        /* Find save-as button on first run or if not found */
+        if (!button_state.save_as_button) {
+            GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(window));
+            if (child) {
+                button_state.save_as_button = find_widget_by_name(child, "save_as_button");
+                if (button_state.save_as_button) {
+                    button_state.parent_container = gtk_widget_get_parent(button_state.save_as_button);
+                    /* Find position in parent for later re-insertion */
+                    if (GTK_IS_BOX(button_state.parent_container)) {
+                        GtkWidget *sibling = gtk_widget_get_first_child(button_state.parent_container);
+                        button_state.position_in_parent = 0;
+                        while (sibling && sibling != button_state.save_as_button) {
+                            button_state.position_in_parent++;
+                            sibling = gtk_widget_get_next_sibling(sibling);
+                        }
+                    }
+                }
+            }
         }
+
+        /* Remove/add button from/to layout to prevent measurement issues */
+        if (button_state.save_as_button && button_state.parent_container) {
+            if (is_narrow && !button_state.is_detached) {
+                /* Remove from layout entirely */
+                g_object_ref(button_state.save_as_button);  /* Keep alive */
+                gtk_box_remove(GTK_BOX(button_state.parent_container), button_state.save_as_button);
+                button_state.is_detached = TRUE;
+                g_debug("Adaptive layout: narrow - save-as button removed from layout (width: %d)", alloc_w);
+            } else if (!is_narrow && button_state.is_detached) {
+                /* Re-add to layout at original position */
+                GtkWidget *sibling = gtk_widget_get_first_child(button_state.parent_container);
+                GtkWidget *insert_after = NULL;
+
+                /* Find the widget to insert after based on original position */
+                for (gint i = 0; i < button_state.position_in_parent - 1 && sibling; i++) {
+                    insert_after = sibling;
+                    sibling = gtk_widget_get_next_sibling(sibling);
+                }
+
+                if (button_state.position_in_parent == 0) {
+                    /* Insert at beginning */
+                    gtk_box_prepend(GTK_BOX(button_state.parent_container), button_state.save_as_button);
+                } else {
+                    /* Insert after the calculated sibling */
+                    gtk_box_insert_child_after(GTK_BOX(button_state.parent_container),
+                                             button_state.save_as_button,
+                                             insert_after);
+                }
+
+                g_object_unref(button_state.save_as_button);  /* Release our ref */
+                button_state.is_detached = FALSE;
+                g_debug("Adaptive layout: wide - save-as button restored to layout at position %d (width: %d)",
+                       button_state.position_in_parent, alloc_w);
+            }
+        }
+
+        button_state.last_narrow_state = is_narrow;
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════
- * HANDLERS - Window state change callbacks
- * ═══════════════════════════════════════════════════════════════════════════════ */
+/* Helper function to find widget by buildable ID */
+static GtkWidget *find_widget_by_name(GtkWidget *parent, const char *name) {
+    if (!GTK_IS_WIDGET(parent) || !name) return NULL;
 
-static void on_window_size_changed(GtkWindow *window, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
-{
-    GSettings *settings = G_SETTINGS(user_data);
-    g_return_if_fail(GTK_IS_WINDOW(window) && G_IS_SETTINGS(settings));
-
-    /* Only save if window is not maximized and is visible */
-    if (gtk_window_is_maximized(window) || !gtk_widget_get_visible(GTK_WIDGET(window))) {
-        return;
+    /* Check if this widget has the name we're looking for */
+    const char *widget_name = gtk_buildable_get_buildable_id(GTK_BUILDABLE(parent));
+    if (widget_name && g_strcmp0(widget_name, name) == 0) {
+        return parent;
     }
 
-    gint width, height;
-    gtk_window_get_default_size(window, &width, &height);
+    /* Recursively search children */
+    for (GtkWidget *child = gtk_widget_get_first_child(parent);
+         child != NULL;
+         child = gtk_widget_get_next_sibling(child)) {
+        GtkWidget *found = find_widget_by_name(child, name);
+        if (found) return found;
+    }
 
-    /* Validate size before saving */
-    clamp_window_size(&width, &height);
-
-    g_debug("Saving window size: %dx%d", width, height);
-    g_settings_set_int(settings, "window-width", width);
-    g_settings_set_int(settings, "window-height", height);
-
-    /* Update adaptive layout */
-    update_adaptive_classes(window);
+    return NULL;
 }
 
-static void on_window_state_changed(GtkWindow *window, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
-{
-    GSettings *settings = G_SETTINGS(user_data);
-    g_return_if_fail(G_IS_SETTINGS(settings));
-
-    gboolean is_maximized = gtk_window_is_maximized(window);
-    g_debug("Window maximized state changed: %s", is_maximized ? "true" : "false");
-    g_settings_set_boolean(settings, "window-maximized", is_maximized);
+/* notify handler: keep adaptivity in sync */
+static void on_default_size_notify(GObject *obj, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED) {
+    update_adaptive_classes(GTK_WINDOW(obj));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * PUBLIC API - Window size management functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-void window_size_manager_setup_window(GtkWindow *window, GSettings *settings)
-{
-    g_return_if_fail(GTK_IS_WINDOW(window));
-    g_return_if_fail(G_IS_SETTINGS(settings));
+void window_size_manager_apply_size_constraints(GtkWindow *window) {
+    if (!GTK_IS_WINDOW(window)) return;
 
-    /* Set minimum size constraints per GNOME HIG */
     gtk_widget_set_size_request(GTK_WIDGET(window), MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
-    /* Restore saved state or use defaults */
-    window_size_manager_restore_state(window, settings);
-
-    /* Connect signals for automatic persistence */
-    g_signal_connect(window, "notify::default-width",
-                    G_CALLBACK(on_window_size_changed), settings);
-    g_signal_connect(window, "notify::default-height",
-                    G_CALLBACK(on_window_size_changed), settings);
-    g_signal_connect(window, "notify::maximized",
-                    G_CALLBACK(on_window_state_changed), settings);
-
-    g_debug("Window size manager initialized for window");
+    gint w = 0, h = 0;
+    gtk_window_get_default_size(window, &w, &h);
+    if (w == 0 || h == 0) {
+        w = DEFAULT_WINDOW_WIDTH;
+        h = DEFAULT_WINDOW_HEIGHT;
+    }
+    clamp_window_size(&w, &h);
+    clamp_to_workarea(window, &w, &h);
+    gtk_window_set_default_size(window, w, h);
 }
 
-void window_size_manager_restore_state(GtkWindow *window, GSettings *settings)
-{
+gboolean window_size_manager_is_narrow_layout(GtkWindow *window) {
+    if (!GTK_IS_WINDOW(window)) return FALSE;
+    return gtk_widget_get_width(GTK_WIDGET(window)) < NARROW_LAYOUT_THRESHOLD;
+}
+
+void window_size_manager_setup_window(GtkWindow *window, GSettings *settings) {
     g_return_if_fail(GTK_IS_WINDOW(window));
     g_return_if_fail(G_IS_SETTINGS(settings));
 
-    /* Get saved dimensions */
-    gint saved_width = g_settings_get_int(settings, "window-width");
-    gint saved_height = g_settings_get_int(settings, "window-height");
-    gboolean was_maximized = g_settings_get_boolean(settings, "window-maximized");
-
-    /* Validate against current display */
-    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(window));
-    if (!is_size_valid_for_display(saved_width, saved_height, display)) {
-        g_debug("Saved size %dx%d invalid for current display, using defaults",
-                saved_width, saved_height);
-        saved_width = DEFAULT_WINDOW_WIDTH;
-        saved_height = DEFAULT_WINDOW_HEIGHT;
-        was_maximized = FALSE;
-    }
-
-    /* Apply size constraints */
-    clamp_window_size(&saved_width, &saved_height);
-
-    /* Set the size */
-    gtk_window_set_default_size(window, saved_width, saved_height);
-
-    /* Restore maximized state if it was set */
-    if (was_maximized) {
-        gtk_window_maximize(window);
-    }
-
-    g_debug("Restored window state: %dx%d, maximized: %s",
-            saved_width, saved_height, was_maximized ? "true" : "false");
-}
-
-void window_size_manager_save_state(GtkWindow *window, GSettings *settings)
-{
-    g_return_if_fail(GTK_IS_WINDOW(window));
-    g_return_if_fail(G_IS_SETTINGS(settings));
-
-    /* Save current maximized state */
-    gboolean is_maximized = gtk_window_is_maximized(window);
-    g_settings_set_boolean(settings, "window-maximized", is_maximized);
-
-    /* Save size only if not maximized */
-    if (!is_maximized) {
-        gint width, height;
-        gtk_window_get_default_size(window, &width, &height);
-
-        clamp_window_size(&width, &height);
-
-        g_settings_set_int(settings, "window-width", width);
-        g_settings_set_int(settings, "window-height", height);
-
-        g_debug("Saved window size on close: %dx%d", width, height);
-    }
-}
-
-gboolean window_size_manager_is_narrow_layout(GtkWindow *window)
-{
-    g_return_val_if_fail(GTK_IS_WINDOW(window), FALSE);
-
-    gint width, height;
-    gtk_window_get_default_size(window, &width, &height);
-
-    return width < NARROW_LAYOUT_THRESHOLD;
-}
-
-void window_size_manager_apply_size_constraints(GtkWindow *window)
-{
-    g_return_if_fail(GTK_IS_WINDOW(window));
-
-    /* Ensure minimum size is always enforced */
+    /* Minimum size per HIG */
     gtk_widget_set_size_request(GTK_WIDGET(window), MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
-    /* Get current size and clamp if needed */
-    gint width, height;
-    gtk_window_get_default_size(window, &width, &height);
+    /* Bind settings <-> window properties. Why: fewer handlers, instant persistence. */
+    g_settings_bind(settings, "window-width",  window, "default-width",  G_SETTINGS_BIND_DEFAULT);
+    g_settings_bind(settings, "window-height", window, "default-height", G_SETTINGS_BIND_DEFAULT);
+    g_settings_bind(settings, "window-maximized", window, "maximized",  G_SETTINGS_BIND_DEFAULT);
 
-    gint original_width = width, original_height = height;
-    clamp_window_size(&width, &height);
+    /* Initialize sane defaults if schema values are unset (0) */
+    gint w = 0, h = 0;
+    gtk_window_get_default_size(window, &w, &h);
+    if (w <= 0 || h <= 0) {
+        gtk_window_set_default_size(window, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    }
 
-    if (width != original_width || height != original_height) {
-        g_debug("Applying size constraints: %dx%d -> %dx%d",
-                original_width, original_height, width, height);
-        gtk_window_set_default_size(window, width, height);
+    /* Enforce constraints and adaptivity on startup */
+    window_size_manager_apply_size_constraints(window);
+    update_adaptive_classes(window);
+
+    /* Keep adaptivity in sync with user-driven resizes */
+    g_signal_connect(window, "notify::default-width",  G_CALLBACK(on_default_size_notify), NULL);
+    g_signal_connect(window, "notify::default-height", G_CALLBACK(on_default_size_notify), NULL);
+
+    g_debug("Window size manager initialized with GSettings binding");
+}
+
+void window_size_manager_restore_state(GtkWindow *window, GSettings *settings) {
+    g_return_if_fail(GTK_IS_WINDOW(window));
+    g_return_if_fail(G_IS_SETTINGS(settings));
+
+    gint w = g_settings_get_int(settings, "window-width");
+    gint h = g_settings_get_int(settings, "window-height");
+    gboolean maximized = g_settings_get_boolean(settings, "window-maximized");
+
+    if (w <= 0 || h <= 0) {
+        w = DEFAULT_WINDOW_WIDTH;
+        h = DEFAULT_WINDOW_HEIGHT;
+    }
+
+    clamp_window_size(&w, &h);
+    clamp_to_workarea(window, &w, &h);
+    gtk_window_set_default_size(window, w, h);
+
+    if (maximized) gtk_window_maximize(window);
+
+    /* Ensure constraints after restore */
+    window_size_manager_apply_size_constraints(window);
+
+    g_debug("Restored window state: %dx%d, maximized: %s", w, h, maximized ? "true" : "false");
+}
+
+void window_size_manager_save_state(GtkWindow *window, GSettings *settings) {
+    g_return_if_fail(GTK_IS_WINDOW(window));
+    g_return_if_fail(G_IS_SETTINGS(settings));
+
+    const gboolean maximized = gtk_window_is_maximized(window);
+    g_settings_set_boolean(settings, "window-maximized", maximized);
+
+    /* Avoid stomping last normal size while maximized. Why: preserve user's non-max size. */
+    if (!maximized) {
+        gint w = 0, h = 0;
+        gtk_window_get_default_size(window, &w, &h);
+        if (w <= 0 || h <= 0) {
+            w = DEFAULT_WINDOW_WIDTH;
+            h = DEFAULT_WINDOW_HEIGHT;
+        }
+        clamp_window_size(&w, &h);
+        g_settings_set_int(settings, "window-width",  w);
+        g_settings_set_int(settings, "window-height", h);
+
+        g_debug("Saved window size on close: %dx%d", w, h);
     }
 }
