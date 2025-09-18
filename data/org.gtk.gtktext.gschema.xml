@@ -1,5 +1,5 @@
-<!-- [1.0.1] - 2025-09-16 - data/org.gtk.gtktext.gschema.xml
-     Changed: Removed legacy autosave-delay-ms setting - DocumentManager handles autosave internally.
+<!-- [1.0.2] - 2025-09-18 - data/org.gtk.gtktext.gschema.xml
+     Changed: Added GNOME HIG-compliant window sizing settings (width, height, maximized state)
 -->
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
@@ -27,6 +27,32 @@
       <description>
         When enabled, the application will automatically save changes every few seconds
         to prevent data loss. When disabled, only manual saves will occur.
+      </description>
+    </key>
+    <key name="window-width" type="i">
+      <default>900</default>
+      <range min="600" max="3840"/>
+      <summary>Main window width</summary>
+      <description>
+        Width of the main window in pixels. Automatically saved when the window
+        is resized and restored on next launch. Minimum 600px for usability.
+      </description>
+    </key>
+    <key name="window-height" type="i">
+      <default>700</default>
+      <range min="400" max="2160"/>
+      <summary>Main window height</summary>
+      <description>
+        Height of the main window in pixels. Automatically saved when the window
+        is resized and restored on next launch. Minimum 400px for usability.
+      </description>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized state</summary>
+      <description>
+        Whether the main window was maximized when last closed. Restored on
+        next launch to maintain user's preferred window state.
       </description>
     </key>
   </schema>

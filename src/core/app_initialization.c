@@ -17,6 +17,7 @@
 #include <adwaita.h>
 
 #include <gtktext/core/app_initialization.h>
+#include <gtktext/core/window_size_manager.h>
 #include <gtktext/components/toolbar.h>
 #include <gtktext/render/cmrender.h>
 #include <gtktext/render/theme_styles.h>
@@ -91,6 +92,33 @@ void app_initialization_activate(GApplication *application)
     gtk_window_set_application(GTK_WINDOW(window), GTK_APPLICATION(app));
     /* Ensure window action context has the application action group */
     gtk_widget_insert_action_group(window, "app", G_ACTION_GROUP(app));
+
+    /* Setup GNOME HIG-compliant window sizing with persistence */
+    GSettings *settings = g_settings_new("org.gtk.gtktext");
+    window_size_manager_setup_window(GTK_WINDOW(window), settings);
+    g_object_set_data_full(G_OBJECT(window), "settings", settings, g_object_unref);
+
+    /* Load adaptive layout CSS */
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    const char *css_candidates[] = {
+        "data/adaptive-layout.css",          /* Development */
+        "share/gtktext/adaptive-layout.css", /* Installed */
+        NULL
+    };
+    for (int i = 0; css_candidates[i] != NULL; i++) {
+        if (g_file_test(css_candidates[i], G_FILE_TEST_EXISTS)) {
+            GFile *css_file = g_file_new_for_path(css_candidates[i]);
+            gtk_css_provider_load_from_file(css_provider, css_file);
+            g_object_unref(css_file);
+            gtk_style_context_add_provider_for_display(
+                gtk_widget_get_display(window),
+                GTK_STYLE_PROVIDER(css_provider),
+                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+            g_debug("Loaded adaptive CSS from: %s", css_candidates[i]);
+            break;
+        }
+    }
+    g_object_unref(css_provider);
 
     /* Get tab infrastructure from UI */
     AdwTabView *tab_view = ADW_TAB_VIEW(gtk_builder_get_object(builder, "tab_view"));

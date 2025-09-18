@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- [1.1.0] - 2025-09-17 - ui/main_window.ui
-     MINOR RELEASE: Tabbed document interface with AdwTabView
+<!-- [1.1.1] - 2025-09-18 - ui/main_window.ui
+     PATCH: GNOME HIG-compliant window sizing with adaptive layout support
 -->
 <interface>
   <requires lib="gtk" version="4.0"/>
   <requires lib="libadwaita" version="1.0"/>
   <object class="AdwApplicationWindow" id="main_window">
     <property name="title" translatable="yes">GTKText</property>
-    <property name="default-width">800</property>
-    <property name="default-height">600</property>
+    <!-- Window size managed programmatically with GSettings persistence -->
     <accessibility>
       <property name="label" translatable="yes">GTKText main window</property>
       <property name="description" translatable="yes">Main application window for editing markdown documents</property>
@@ -18,44 +17,55 @@
         <child type="top">
           <object class="AdwHeaderBar" id="header_bar">
             <property name="show-end-title-buttons">true</property>
+            <!-- Primary action buttons with adaptive behavior -->
             <child type="start">
-              <object class="GtkButton" id="new_tab_button">
-                <property name="icon-name">tab-new-symbolic</property>
-                <property name="tooltip-text" translatable="yes">New Tab</property>
-                <accessibility>
-                  <property name="label" translatable="yes">New tab</property>
-                  <property name="description" translatable="yes">Create a new document tab</property>
-                </accessibility>
-              </object>
-            </child>
-            <child type="start">
-              <object class="GtkButton" id="open_button">
-                <property name="icon-name">document-open-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Open a File</property>
-                <accessibility>
-                  <property name="label" translatable="yes">Open file</property>
-                  <property name="description" translatable="yes">Open an existing markdown file</property>
-                </accessibility>
-              </object>
-            </child>
-            <child type="start">
-              <object class="GtkButton" id="save_button">
-                <property name="icon-name">document-save-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Save Document</property>
-                <accessibility>
-                  <property name="label" translatable="yes">Save document</property>
-                  <property name="description" translatable="yes">Save the current document to file</property>
-                </accessibility>
-              </object>
-            </child>
-            <child type="start">
-              <object class="GtkButton" id="save_as_button">
-                <property name="icon-name">document-save-as-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Save Document As...</property>
-                <accessibility>
-                  <property name="label" translatable="yes">Save document as</property>
-                  <property name="description" translatable="yes">Save the current document to a new file location</property>
-                </accessibility>
+              <object class="GtkBox" id="primary_buttons">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <child>
+                  <object class="GtkButton" id="new_tab_button">
+                    <property name="icon-name">tab-new-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">New Tab</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">New tab</property>
+                      <property name="description" translatable="yes">Create a new document tab</property>
+                    </accessibility>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="open_button">
+                    <property name="icon-name">document-open-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Open a File</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Open file</property>
+                      <property name="description" translatable="yes">Open an existing markdown file</property>
+                    </accessibility>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="save_button">
+                    <property name="icon-name">document-save-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Save Document</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Save document</property>
+                      <property name="description" translatable="yes">Save the current document to file</property>
+                    </accessibility>
+                  </object>
+                </child>
+                <!-- Save As button - hidden on narrow screens -->
+                <child>
+                  <object class="GtkButton" id="save_as_button">
+                    <property name="icon-name">document-save-as-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Save Document As...</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Save document as</property>
+                      <property name="description" translatable="yes">Save the current document to a new file location</property>
+                    </accessibility>
+                    <style>
+                      <class name="adaptive-hide-narrow"/>
+                    </style>
+                  </object>
+                </child>
               </object>
             </child>
             <child type="title">
@@ -86,7 +96,7 @@
           </object>
         </child>
 
-        <!-- Phase 5: Status bar for save notifications and file info -->
+        <!-- Adaptive status bar - responsive to window width -->
         <child type="bottom">
           <object class="GtkBox" id="status_bar_container">
             <property name="orientation">horizontal</property>
@@ -104,15 +114,18 @@
               <object class="GtkLabel" id="save_status">
                 <property name="label"></property>
                 <property name="halign">start</property>
-                <property name="width-chars">20</property>
-                <property name="max-width-chars">30</property>
+                <property name="width-chars">15</property>
+                <property name="max-width-chars">25</property>
                 <property name="ellipsize">end</property>
               </object>
             </child>
 
             <child>
-              <object class="GtkSeparator">
+              <object class="GtkSeparator" id="status_separator">
                 <property name="orientation">vertical</property>
+                <style>
+                  <class name="adaptive-hide-narrow"/>
+                </style>
               </object>
             </child>
 
@@ -122,8 +135,11 @@
                 <property name="halign">start</property>
                 <property name="hexpand">true</property>
                 <property name="ellipsize">middle</property>
-                <property name="width-chars">30</property>
-                <property name="max-width-chars">50</property>
+                <property name="width-chars">20</property>
+                <property name="max-width-chars">40</property>
+                <style>
+                  <class name="adaptive-hide-narrow"/>
+                </style>
               </object>
             </child>
           </object>

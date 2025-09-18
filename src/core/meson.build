@@ -9,6 +9,7 @@ core_sources += files(
   'util.c',
   'settings_manager.c',
   'window_lifecycle.c',
+  'window_size_manager.c',
   'app_initialization.c',
   'signal_manager.c'
 )

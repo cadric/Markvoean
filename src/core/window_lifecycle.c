@@ -16,6 +16,7 @@
 #include <gtktext/core/settings_manager.h>
 #include <gtktext/core/app_initialization.h>
 #include <gtktext/core/signal_manager.h>
+#include <gtktext/core/window_size_manager.h>
 #include <gtktext/document/document_manager.h>
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/editor/buffer_manager.h>
@@ -59,6 +60,12 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
     }
 
     g_debug("window_lifecycle_on_window_close_request: no unsaved changes, proceeding with close");
+
+    /* Save window state before closing */
+    GSettings *settings = g_object_get_data(G_OBJECT(window), "settings");
+    if (settings) {
+        window_size_manager_save_state(window, settings);
+    }
 
     /* Clean up signal connections through proper signal manager */
     SignalManager *sm = gtktext_get_signal_manager();

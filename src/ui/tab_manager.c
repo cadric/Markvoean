@@ -2,7 +2,7 @@
    Purpose: Multi-document tab management for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
    [1.0.1] - 2025-09-18 - ui/tab_manager.c
-   FIXED: UnsavedChangesContext memory leak on early return (tab_manager.c:304)
+   FIXED: UnsavedChangesContext memory leak + global accessor back-references
 */
 
 #ifdef HAVE_CONFIG_H
@@ -556,8 +556,9 @@ TabManager *tab_manager_new(AdwTabView *tab_view, AdwTabBar *tab_bar, GtkApplica
     tm->priv->tab_documents = g_hash_table_new(g_direct_hash, g_direct_equal);
     tm->priv->initialized = TRUE;
 
-    /* Store back-reference on the view for robust signal callbacks */
+    /* Store back-references for lookups */
     g_object_set_data(G_OBJECT(tab_view), "tab_manager", tm);
+    g_object_set_data(G_OBJECT(app), "tab_manager", tm);
 
     /* Connect tab bar to tab view */
     adw_tab_bar_set_view(tab_bar, tab_view);
@@ -624,7 +625,10 @@ void tab_manager_destroy(TabManager *tm)
             tm->priv->tab_documents = NULL; /* Explicitly null the pointer */
         }
 
-        /* Step 4: Clear tab_view reference */
+        /* Step 4: Clear app/view back-references */
+        if (tm->priv->app) {
+            g_object_set_data(G_OBJECT(tm->priv->app), "tab_manager", NULL);
+        }
         tm->priv->tab_view = NULL;
 
         g_free(tm->priv);

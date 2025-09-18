@@ -1,0 +1,62 @@
+/* Adaptive Layout CSS
+ * Purpose: GNOME HIG-compliant responsive behavior with proper GTK4 sizing
+ * [1.0.1] - 2025-09-18 - data/adaptive-layout.css
+ * FIXED: All GTK height measurement warnings resolved
+ */
+
+/* Narrow layout adaptations - hide elements on narrow screens */
+.narrow-layout .adaptive-hide-narrow {
+    opacity: 0;
+    transition: opacity 200ms ease;
+}
+
+/* Wide layout - show adaptive elements */
+.adaptive-hide-narrow {
+    opacity: 1;
+    transition: opacity 200ms ease;
+}
+
+/* Status bar adaptations for narrow screens */
+.narrow-layout .statusbar {
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+/* Header bar adaptations */
+.narrow-layout box {
+    margin: 2px;
+}
+
+/* Ensure minimum touch targets are maintained */
+button {
+    min-width: 32px;
+    min-height: 32px;
+}
+
+/* Fix minimum height requirements for UI elements */
+label {
+    min-height: 20px;
+}
+
+/* Header and content boxes need more height */
+headerbar box,
+box {
+    min-height: 22px;
+}
+
+/* Status bar specific sizing - override general box rule */
+.statusbar,
+.statusbar box {
+    min-height: 24px;
+}
+
+/* Tab bar area needs adequate height */
+tabbar,
+AdwGizmo {
+    min-height: 22px;
+}
+
+/* Responsive status bar spacing */
+.statusbar {
+    padding: 2px 6px;
+}
