@@ -40,7 +40,6 @@ struct _TabDocument {
     /* Tab metadata */
     gchar *file_path;                 /* Full file path */
     gchar *tab_title;                 /* Display title */
-    gboolean is_dirty;                /* Unsaved changes */
     gboolean is_welcome;              /* Is this the welcome tab */
     gboolean being_destroyed;         /* Destruction in progress flag */
 
@@ -51,9 +50,6 @@ struct _TabDocument {
     GtkWidget *original_text_view;    /* Original WYSIWYG text view */
     gboolean original_text_view_has_ref; /* TRUE if we took an explicit ref on original_text_view */
 
-    /* Signal handlers */
-    gulong buffer_changed_handler_id;
-    gulong source_buffer_changed_handler_id;
 
     /* State change callbacks */
     TabDocumentDirtyStateCallback dirty_state_callback;
@@ -84,13 +80,15 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
 
     if (td && td->pending_markdown_content) {
         /* Block buffer change signals during deferred rendering */
-        if (td->buffer_changed_handler_id > 0) {
-            g_signal_handler_block(td->buffer, td->buffer_changed_handler_id);
-        }
+
+        /* Block markdown engine automatic reparsing during initialization */
+        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+        g_debug("DEFERRED: Suppressed markdown reparse during initialization");
 
         /* Also block DocumentManager buffer signals */
         if (td->doc_manager) {
             document_manager_block_buffer_signals(td->doc_manager);
+            g_debug("DEFERRED: Blocked DocumentManager signals before re-rendering");
         }
 
         /* Re-render the markdown now that the text view is ready */
@@ -98,14 +96,28 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
                                     GTK_TEXT_VIEW(td->text_view), NULL);
 
         /* Unblock buffer change signals */
-        if (td->buffer_changed_handler_id > 0) {
-            g_signal_handler_unblock(td->buffer, td->buffer_changed_handler_id);
-        }
 
         /* Unblock DocumentManager buffer signals */
         if (td->doc_manager) {
             document_manager_unblock_buffer_signals(td->doc_manager);
+            g_debug("DEFERRED: Unblocked DocumentManager signals after re-rendering");
         }
+
+        /* Update DocumentManager baseline AFTER unblocking signals to ensure state change is properly triggered */
+        if (td->doc_manager) {
+            /* Update original content to match the rendered buffer content */
+            /* This ensures DocumentManager considers the rendered state as the "clean" baseline */
+            document_manager_update_baseline(td->doc_manager);
+            g_debug("DEFERRED: Updated DocumentManager baseline after markdown rendering");
+
+            /* Finalize initialization to enable buffer change detection */
+            document_manager_finalize_initialization(td->doc_manager);
+            g_debug("DEFERRED: Finalized DocumentManager initialization");
+        }
+
+        /* Re-enable markdown engine automatic reparsing after initialization is complete */
+        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
+        g_debug("DEFERRED: Re-enabled markdown reparse after initialization complete");
 
         /* Clean up the pending content */
         g_free(td->pending_markdown_content);
@@ -121,52 +133,7 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
     }
 }
 
-static void on_buffer_changed(GtkTextBuffer *buffer, gpointer user_data)
-{
-    TabDocument *td = (TabDocument *)user_data;
-    if (td && !td->is_welcome) {
-        gboolean was_dirty = td->is_dirty;
 
-        /* Check if there's a pending user change that should force dirty state */
-        gboolean user_change_pending = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer),
-                                                                         "gtktext-user-change-pending")) != 0;
-
-        /* Sync with DocumentManager state if available */
-        gboolean is_now_dirty = TRUE;  /* Default assumption */
-        if (td->doc_manager) {
-            /* Check if DocumentManager considers this dirty, or if user change is pending */
-            is_now_dirty = document_manager_has_unsaved_changes(td->doc_manager) || user_change_pending;
-        }
-
-        td->is_dirty = is_now_dirty;
-
-
-
-        /* Phase 3: Notify callback if dirty state changed */
-        if (was_dirty != is_now_dirty && td->dirty_state_callback) {
-            g_debug("Calling dirty state callback");
-            td->dirty_state_callback(td, is_now_dirty, td->dirty_state_callback_data);
-        }
-    }
-}
-
-static void on_source_buffer_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, gpointer user_data)
-{
-    TabDocument *td = (TabDocument *)user_data;
-    if (td && !td->is_welcome && td->is_source_mode) {
-        /* When in source mode, mark document as dirty since user made changes */
-        gboolean was_dirty = td->is_dirty;
-        td->is_dirty = TRUE;
-
-        g_debug("Source buffer changed: marking document as dirty");
-
-        /* Notify callback if dirty state changed */
-        if (!was_dirty && td->dirty_state_callback) {
-            g_debug("Calling dirty state callback for source change");
-            td->dirty_state_callback(td, TRUE, td->dirty_state_callback_data);
-        }
-    }
-}
 
 /* Document manager state change callback that syncs with tab document */
 static void on_document_manager_state_changed(DocumentManager *dm, DocumentState old_state,
@@ -175,11 +142,9 @@ static void on_document_manager_state_changed(DocumentManager *dm, DocumentState
     TabDocument *td = user_data;
     g_return_if_fail(td != NULL);
 
-    /* Update tab document dirty state to match document manager */
+    /* Get dirty state from DocumentManager (single source of truth) */
     gboolean new_dirty = (new_state == DOC_STATE_DIRTY || new_state == DOC_STATE_DRAFT);
-    gboolean was_dirty = td->is_dirty;
-    td->is_dirty = new_dirty;
-
+    gboolean was_dirty = (old_state == DOC_STATE_DIRTY || old_state == DOC_STATE_DRAFT);
 
     /* Update status bar through the standard mechanism */
     GtkWidget *window = gtk_widget_get_ancestor(td->container, GTK_TYPE_WINDOW);
@@ -301,17 +266,11 @@ TabDocument *tab_document_new(void)
     td->doc_manager = NULL;
 
 
-    /* Connect buffer change signal */
-    td->buffer_changed_handler_id = g_signal_connect(td->buffer, "changed",
-                                                     G_CALLBACK(on_buffer_changed), td);
-
     /* Initialize state */
-    td->is_dirty = FALSE;
     td->is_welcome = FALSE;
     td->being_destroyed = FALSE;
     td->tab_title = g_strdup(_("Untitled"));
     td->pending_markdown_content = NULL;
-    td->source_buffer_changed_handler_id = 0;  /* Will be connected when entering source mode */
 
     /* Initialize source view state */
     td->is_source_mode = FALSE;
@@ -333,16 +292,15 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
     g_return_if_fail(window != NULL);
     g_return_if_fail(td->buffer != NULL);
 
+    g_debug("INITIALIZING DocumentManager for TabDocument, file_path=%s", td->file_path ? td->file_path : "(null)");
+
     /* Only initialize if not already done */
     if (td->doc_manager != NULL) {
         g_debug("DocumentManager already initialized for this tab");
         return;
     }
 
-    /* Block TabDocument's buffer change handler during DocumentManager initialization */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_block(td->buffer, td->buffer_changed_handler_id);
-    }
+    /* DocumentManager will now handle all buffer change signals directly */
 
     /* Create DocumentManager for this document tab (without state callback initially) */
     td->doc_manager = document_manager_new(td->buffer, window);
@@ -351,6 +309,10 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
 
         /* If this tab has a file path, tell the DocumentManager about it */
         if (td->file_path) {
+            /* Block DocumentManager signals during file setup to prevent false dirty state */
+            document_manager_block_buffer_signals(td->doc_manager);
+            g_debug("BLOCKED DocumentManager signals for file setup: %s", td->file_path);
+
             GError *error = NULL;
             if (!document_manager_open_file(td->doc_manager, td->file_path, &error)) {
                 g_warning("Failed to tell DocumentManager about file path %s: %s",
@@ -358,6 +320,16 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
                 g_clear_error(&error);
             } else {
                 g_debug("DocumentManager now knows about file: %s", td->file_path);
+            }
+
+            /* Unblock signals after file setup */
+            document_manager_unblock_buffer_signals(td->doc_manager);
+            g_debug("UNBLOCKED DocumentManager signals after file setup: %s", td->file_path);
+
+            /* Finalize initialization for non-markdown files (markdown files will be finalized after deferred rendering) */
+            if (!td->file_path || !g_str_has_suffix(td->file_path, ".md")) {
+                document_manager_finalize_initialization(td->doc_manager);
+                g_debug("Finalized DocumentManager initialization for non-markdown file");
             }
         }
 
@@ -381,17 +353,9 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
         g_warning("Failed to create DocumentManager for document tab");
     }
 
-    /* Unblock TabDocument's buffer change handler - now ready for user edits */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_unblock(td->buffer, td->buffer_changed_handler_id);
-    }
+    /* DocumentManager is now ready to handle all buffer changes */
 
-    /* Ensure TabDocument state is synced with DocumentManager final state */
-    if (td->doc_manager) {
-        gboolean actual_dirty = document_manager_has_unsaved_changes(td->doc_manager);
-        td->is_dirty = actual_dirty;
-        g_debug("Synced TabDocument dirty state: %s", actual_dirty ? "TRUE" : "FALSE");
-    }
+    /* DocumentManager is now the single source of truth for dirty state */
 }
 
 TabDocument *tab_document_new_from_file(const char *file_path)
@@ -473,7 +437,6 @@ TabDocument *tab_document_new_welcome(void)
     gtk_box_append(GTK_BOX(td->container), welcome_content);
 
     td->is_welcome = TRUE;
-    td->is_dirty = FALSE;
     td->tab_title = g_strdup(_("Welcome"));
 
     /* Initialize source view state - welcome tabs don't have source view */
@@ -511,22 +474,6 @@ void tab_document_destroy(TabDocument *td)
         g_debug("Disconnected deferred render signal to prevent UAF");
     }
 
-    if (td->buffer_changed_handler_id > 0 && td->buffer && G_IS_OBJECT(td->buffer)) {
-        if (g_signal_handler_is_connected(td->buffer, td->buffer_changed_handler_id)) {
-            g_signal_handler_disconnect(td->buffer, td->buffer_changed_handler_id);
-            g_debug("Disconnected buffer signal");
-        }
-    }
-    td->buffer_changed_handler_id = 0;
-
-    /* Also disconnect source buffer signals if connected */
-    if (td->source_buffer_changed_handler_id > 0 && td->source_buffer && G_IS_OBJECT(td->source_buffer)) {
-        if (g_signal_handler_is_connected(td->source_buffer, td->source_buffer_changed_handler_id)) {
-            g_signal_handler_disconnect(td->source_buffer, td->source_buffer_changed_handler_id);
-            g_debug("Disconnected source buffer signal");
-        }
-    }
-    td->source_buffer_changed_handler_id = 0;
 
     /* Step 2: Clear callback to prevent any calls during destruction */
     td->dirty_state_callback = NULL;
@@ -598,8 +545,15 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
     }
 
     /* Block buffer changed signal during load */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_block(td->buffer, td->buffer_changed_handler_id);
+    if (td->doc_manager) {
+        document_manager_block_buffer_signals(td->doc_manager);
+        g_debug("Blocked DocumentManager buffer signals during file load");
+    }
+
+    /* Suppress markdown engine reparse during entire file loading process for markdown files */
+    if (g_str_has_suffix(file_path, ".md")) {
+        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+        g_debug("LOAD: Suppressed markdown reparse for entire file loading process");
     }
 
     /* Set content in buffer */
@@ -607,6 +561,7 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
 
     /* Render markdown if applicable - defer until text view is realized */
     if (g_str_has_suffix(file_path, ".md")) {
+
         /* Store original content for later rendering */
         g_free(td->pending_markdown_content);
         td->pending_markdown_content = g_strdup(contents);
@@ -615,16 +570,23 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
         cm_render_markdown_to_buffer(td->buffer, contents,
                                     GTK_TEXT_VIEW(td->text_view), NULL);
 
+        /* Restore suppression flag as cmrender clears it internally */
+        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+        g_debug("LOAD: Restored markdown reparse suppression after initial rendering");
+
         /* Set up callback for when text view becomes mapped */
         if (!gtk_widget_get_mapped(GTK_WIDGET(td->text_view))) {
             g_signal_connect_after(td->text_view, "map",
                                   G_CALLBACK(on_text_view_mapped), td);
         }
+
+        /* Note: suppression flag will be cleared by the deferred rendering callback */
     }
 
     /* Unblock signal */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_unblock(td->buffer, td->buffer_changed_handler_id);
+    if (td->doc_manager) {
+        document_manager_unblock_buffer_signals(td->doc_manager);
+        g_debug("Unblocked DocumentManager buffer signals after file load");
     }
 
     /* Update document metadata */
@@ -763,30 +725,26 @@ const char *tab_document_get_file_path(TabDocument *td)
 gboolean tab_document_get_modified(TabDocument *td)
 {
     g_return_val_if_fail(td != NULL, FALSE);
-    return td->is_dirty;
+    if (!td->doc_manager) return FALSE;
+
+    DocumentState state = document_manager_get_state(td->doc_manager);
+    return (state == DOC_STATE_DIRTY || state == DOC_STATE_DRAFT);
 }
 
 void tab_document_set_modified(TabDocument *td, gboolean modified)
 {
     g_return_if_fail(td != NULL);
 
-    gboolean was_dirty = td->is_dirty;
+    /* DocumentManager is now the single source of truth for dirty state.
+     * This function is now mostly a no-op, but we keep it for API compatibility.
+     * Real state changes happen through DocumentManager's buffer change handlers. */
 
-    /* Honor the caller's request */
-    td->is_dirty = !!modified;
+    g_debug("TabDocument set_modified called: modified=%s (DocumentManager handles state)",
+            modified ? "TRUE" : "FALSE");
 
-    /* Sync with DocumentManager if available */
-    if (td->doc_manager) {
-        /* TODO: Need DocumentManager API to set dirty state - for now just query for consistency */
-        gboolean manager_state = document_manager_has_unsaved_changes(td->doc_manager);
-        g_debug("TabDocument dirty state set to %s, DocumentManager state: %s",
-                td->is_dirty ? "TRUE" : "FALSE", manager_state ? "TRUE" : "FALSE");
-    }
-
-    /* Notify callback if dirty state changed */
-    if (was_dirty != td->is_dirty && td->dirty_state_callback) {
-        td->dirty_state_callback(td, td->is_dirty, td->dirty_state_callback_data);
-    }
+    /* Note: We don't manually call the dirty state callback here because
+     * DocumentManager will trigger on_document_manager_state_changed which
+     * will call the callback when state actually changes. */
 }
 
 GtkWidget *tab_document_get_widget(TabDocument *td)
@@ -921,12 +879,6 @@ gboolean tab_document_switch_to_source_view(TabDocument *td)
     gtk_stack_set_visible_child_name(stack, "source");
     td->is_source_mode = TRUE;
 
-    /* Connect source buffer change tracking */
-    if (td->source_buffer && td->source_buffer_changed_handler_id == 0) {
-        td->source_buffer_changed_handler_id = g_signal_connect(td->source_buffer, "changed",
-                                                               G_CALLBACK(on_source_buffer_changed), td);
-        g_debug("Connected source buffer change tracking");
-    }
 
     g_debug("TabDocument switched to source view");
     return TRUE;
@@ -955,12 +907,7 @@ gboolean tab_document_switch_to_wysiwyg_view(TabDocument *td)
         return FALSE;
     }
 
-    /* Disconnect source buffer change tracking */
-    if (td->source_buffer_changed_handler_id > 0) {
-        g_signal_handler_disconnect(td->source_buffer, td->source_buffer_changed_handler_id);
-        td->source_buffer_changed_handler_id = 0;
-        g_debug("Disconnected source buffer change tracking");
-    }
+    /* Source buffer change tracking removed - DocumentManager handles all state */
 
     /* Release explicit ref grabbed when entering source mode */
     if (td->original_text_view_has_ref && td->original_text_view && G_IS_OBJECT(td->original_text_view)) {
@@ -987,10 +934,6 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
     g_debug("Starting WYSIWYG to source sync");
 
     /* Block all buffer change signals during sync to prevent false dirty state */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_block(td->buffer, td->buffer_changed_handler_id);
-        g_debug("Blocked TabDocument buffer signals during sync");
-    }
 
     if (td->doc_manager) {
         document_manager_block_buffer_signals(td->doc_manager);
@@ -1003,9 +946,6 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
         g_warning("Failed to export WYSIWYG buffer to markdown");
 
         /* Unblock signals before returning */
-        if (td->buffer_changed_handler_id > 0) {
-            g_signal_handler_unblock(td->buffer, td->buffer_changed_handler_id);
-        }
         if (td->doc_manager) {
             document_manager_unblock_buffer_signals(td->doc_manager);
         }
@@ -1016,10 +956,6 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
     gtk_text_buffer_set_text(td->source_buffer, markdown, -1);
 
     /* Unblock buffer change signals */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_unblock(td->buffer, td->buffer_changed_handler_id);
-        g_debug("Unblocked TabDocument buffer signals after sync");
-    }
 
     if (td->doc_manager) {
         document_manager_unblock_buffer_signals(td->doc_manager);
@@ -1040,10 +976,6 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
     g_debug("Starting source to WYSIWYG sync");
 
     /* Block all buffer change signals during sync to prevent false dirty state */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_block(td->buffer, td->buffer_changed_handler_id);
-        g_debug("Blocked TabDocument buffer signals during sync");
-    }
 
     if (td->doc_manager) {
         document_manager_block_buffer_signals(td->doc_manager);
@@ -1066,10 +998,6 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
     cm_render_markdown_to_buffer(td->buffer, source_markdown, GTK_TEXT_VIEW(td->text_view), NULL);
 
     /* Unblock buffer change signals */
-    if (td->buffer_changed_handler_id > 0) {
-        g_signal_handler_unblock(td->buffer, td->buffer_changed_handler_id);
-        g_debug("Unblocked TabDocument buffer signals after sync");
-    }
 
     if (td->doc_manager) {
         document_manager_unblock_buffer_signals(td->doc_manager);

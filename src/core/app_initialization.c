@@ -32,6 +32,7 @@
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/ui/image_embedder.h>
 #include <gtktext/ui/text_view_interactions.h>
+#include <gtktext/ui/tab_manager.h>
 #include <gtktext/ui/status_manager.h>
 #include <gtktext/ui/event_handlers.h>
 #include <gtktext/render/markdown/markdown_engine.h>
@@ -352,14 +353,16 @@ void app_initialization_open(GApplication *application, GFile **files, gint n_fi
         if (path) {
             g_debug("Opening file from command line: %s", path);
             GtkApplication *app = GTK_APPLICATION(application);
-            DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
-            if (dm) {
-                GError *error = NULL;
-                if (!document_manager_open_file(dm, path, &error)) {
-                    g_warning("Failed to open file from command line: %s",
-                             error ? error->message : "Unknown error");
-                    g_clear_error(&error);
+
+            /* Use TabManager to open files instead of global DocumentManager */
+            TabManager *tm = g_object_get_data(G_OBJECT(app), "tab_manager");
+            if (tm) {
+                AdwTabPage *page = tab_manager_open_file(tm, path);
+                if (!page) {
+                    g_warning("Failed to open file from command line: %s", path);
                 }
+            } else {
+                g_warning("TabManager not available for opening command line file: %s", path);
             }
         }
     }

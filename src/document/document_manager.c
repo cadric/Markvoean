@@ -43,6 +43,7 @@ struct _DocumentManager {
     gint64 last_mtime;               /* last known modification time */
     gchar *last_hash;                /* owned - content hash for conflict detection */
     gboolean is_untitled;
+    gboolean initialization_complete; /* owned - prevents premature dirty state during setup */
     
     /* Timers and monitoring */
     guint autosave_id;               /* autosave timer source ID */
@@ -101,17 +102,25 @@ static gboolean has_content_changed(DocumentManager *dm)
 {
     g_return_val_if_fail(dm != NULL, FALSE);
     g_return_val_if_fail(dm->buffer != NULL, FALSE);
-    
+
     g_autofree gchar *current_content = get_buffer_content_as_markdown(dm->buffer);
     if (!current_content) return FALSE;
-    
+
     /* Compare with original content */
     if (!dm->original_content) {
         /* No original content means this is a new document with content */
-        return g_utf8_strlen(current_content, -1) > 0;
+        gboolean has_content = (g_utf8_strlen(current_content, -1) > 0);
+        g_debug("has_content_changed: No original content, has_content=%s", has_content ? "TRUE" : "FALSE");
+        return has_content;
     }
-    
-    return g_strcmp0(current_content, dm->original_content) != 0;
+
+    gboolean is_different = (g_strcmp0(current_content, dm->original_content) != 0);
+    if (is_different) {
+        g_debug("has_content_changed: Content differs from original (original_len=%zu, current_len=%zu)",
+                dm->original_content ? strlen(dm->original_content) : 0,
+                current_content ? strlen(current_content) : 0);
+    }
+    return is_different;
 }
 
 /* Update original content after successful save */
@@ -756,12 +765,16 @@ static void on_buffer_changed(GtkTextBuffer *buffer, gpointer user_data)
     gboolean user_change_pending = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer),
                                                                      "gtktext-user-change-pending")) != 0;
 
-    /* Update state to dirty if not already */
-    if (dm->state == DOC_STATE_CLEAN) {
+    /* Update state to dirty if not already and initialization is complete */
+    if (dm->state == DOC_STATE_CLEAN && dm->initialization_complete) {
         /* Force dirty state if user change is pending, or check content change normally */
         if (user_change_pending || has_content_changed(dm)) {
+            g_debug("DocumentManager buffer changed: setting to DIRTY (user_change_pending=%s)",
+                   user_change_pending ? "TRUE" : "FALSE");
             set_document_state(dm, DOC_STATE_DIRTY);
         }
+    } else if (!dm->initialization_complete) {
+        g_debug("DocumentManager buffer changed during initialization - ignoring");
     }
 }
 
@@ -829,6 +842,7 @@ DocumentManager* document_manager_new(GtkTextBuffer *buffer, GtkWindow *window)
     /* Initialize state */
     dm->state = DOC_STATE_CLEAN;
     dm->is_untitled = TRUE;
+    dm->initialization_complete = FALSE;
     dm->last_mtime = 0;
     
     /* Connect to buffer changes */
@@ -1421,4 +1435,23 @@ void document_manager_unblock_buffer_signals(DocumentManager *dm)
         g_signal_handler_unblock(dm->buffer, dm->buffer_changed_handler_id);
         g_debug("DocumentManager buffer signals unblocked");
     }
+}
+
+void document_manager_update_baseline(DocumentManager *dm)
+{
+    g_return_if_fail(dm != NULL);
+
+    /* Update original content to match current buffer content */
+    /* This is useful after markdown rendering to establish the rendered content as the baseline */
+    update_original_content(dm);
+    set_document_state(dm, DOC_STATE_CLEAN);
+    g_debug("DocumentManager baseline updated to current buffer content - state set to CLEAN");
+}
+
+void document_manager_finalize_initialization(DocumentManager *dm)
+{
+    g_return_if_fail(dm != NULL);
+
+    dm->initialization_complete = TRUE;
+    g_debug("DocumentManager initialization finalized - buffer change detection enabled");
 }

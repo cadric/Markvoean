@@ -77,6 +77,10 @@ gboolean document_manager_is_untitled(DocumentManager *dm);
 void document_manager_block_buffer_signals(DocumentManager *dm);
 void document_manager_unblock_buffer_signals(DocumentManager *dm);
 
+/* Content synchronization */
+void document_manager_update_baseline(DocumentManager *dm);
+void document_manager_finalize_initialization(DocumentManager *dm);
+
 /* Recovery and drafts */
 gboolean document_manager_save_draft(DocumentManager *dm, GError **error);
 gboolean document_manager_discard_current_draft(DocumentManager *dm);
