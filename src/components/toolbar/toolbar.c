@@ -172,8 +172,10 @@ static GtkWidget* create_button_for_style(const ButtonInfo *info, ToolbarStyle s
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, _(info->tooltip),
                                    -1);
 
-    // Add style classes for proper theming
+    // Add style classes for proper theming to match header buttons
     gtk_widget_add_css_class(button, "flat");
+    // Use the same styling as header bar buttons for consistent appearance
+    gtk_widget_add_css_class(button, "image-button");
 
     return button;
 }
@@ -211,8 +213,10 @@ static GtkWidget* create_menu_button_for_style(const ButtonInfo *info, ToolbarSt
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, _(info->tooltip),
                                    -1);
 
-    // Add style class
+    // Add style classes for proper theming to match header buttons
     gtk_widget_add_css_class(button, "flat");
+    // Use the same styling as header bar buttons for consistent appearance
+    gtk_widget_add_css_class(button, "image-button");
 
     return button;
 }
@@ -602,7 +606,7 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     }
 
     if (!toolbar_container) {
-        toolbar_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+        toolbar_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
         gtk_widget_add_css_class(toolbar_container, "toolbar");
         g_debug("Created fallback toolbar container");
     }
@@ -640,15 +644,10 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
     toolbar_state.hr_button = GTK_BUTTON(create_button_for_style(&button_info[4], toolbar_state.current_style));
     toolbar_state.source_view_button = GTK_BUTTON(create_button_for_style(&button_info[5], toolbar_state.current_style));
 
-    // Adjust button sizing based on style
+    // Adjust button sizing based on style - let icon-only buttons use natural size like header buttons
     if (toolbar_state.current_style == TOOLBAR_STYLE_ICONS) {
-        // Icon-only buttons are square
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 32, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 32, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 32, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 32, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 32, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 32, 32);
+        // Icon-only buttons use natural sizing like header buttons - no fixed size
+        // The toolbar-button CSS class will handle proper sizing
     } else if (toolbar_state.current_style == TOOLBAR_STYLE_TEXT) {
         // Text-only buttons need more width
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 50, 32);

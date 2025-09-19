@@ -210,11 +210,10 @@ void app_initialization_activate(GApplication *application)
             /* Use the existing create_toolbar function to get fully functional toolbar */
             GtkWidget *functional_toolbar = create_toolbar(text_view);
             if (functional_toolbar) {
-                /* Style the functional toolbar for left alignment */
+                /* Style the functional toolbar to align with header button positioning */
                 gtk_widget_set_halign(functional_toolbar, GTK_ALIGN_START);
-                gtk_widget_set_margin_start(functional_toolbar, 12);
-                gtk_widget_set_margin_top(functional_toolbar, 6);
-                gtk_widget_set_margin_bottom(functional_toolbar, 6);
+                gtk_widget_set_margin_start(functional_toolbar, 0);
+                gtk_widget_set_margin_end(functional_toolbar, 6);
 
                 /* Add the functional toolbar directly as second top-bar */
                 adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), functional_toolbar);

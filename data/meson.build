@@ -43,11 +43,6 @@ if desktop_file_validate.found()
        suite: 'data')
 endif
 
-# Icons
-install_subdir('icons',
-  install_dir: get_option('datadir') / 'gtktext'
-)
-
 # Application icons - scalable and symbolic variants
 install_data('icons/hicolor/scalable/apps/gtktext.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps'

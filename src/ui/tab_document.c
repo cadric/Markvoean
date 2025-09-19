@@ -331,6 +331,10 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
                 document_manager_finalize_initialization(td->doc_manager);
                 g_debug("Finalized DocumentManager initialization for non-markdown file");
             }
+        } else {
+            /* For new documents (no file path), finalize initialization immediately */
+            document_manager_finalize_initialization(td->doc_manager);
+            g_debug("Finalized DocumentManager initialization for new document");
         }
 
         /* IMPORTANT: Set up state change callback AFTER all file operations complete */
