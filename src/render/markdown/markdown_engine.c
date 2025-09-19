@@ -28,11 +28,110 @@ static const char *DATA_REPARSE_TARGET_OFFSET = "gtktext-reparse-target-offset";
  * HELPERS - Internal helper functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
+/* Forward declaration */
+static gboolean reparse_markdown_cb(gpointer user_data);
+
+/* Check if a line contains a completed markdown heading pattern */
+static gboolean is_completed_heading(const gchar *line_text)
+{
+    if (!line_text) return FALSE;
+
+    /* Check for # followed by space (and optional text) */
+    gint hash_count = 0;
+    const gchar *p = line_text;
+
+    /* Count leading # characters */
+    while (*p == '#' && hash_count < 6) {
+        hash_count++;
+        p++;
+    }
+
+    /* Must have 1-6 # followed by space */
+    return (hash_count >= 1 && hash_count <= 6 && *p == ' ');
+}
+
+/* Check if a line contains a completed horizontal rule */
+static gboolean is_completed_hr(const gchar *line_text)
+{
+    if (!line_text) return FALSE;
+
+    /* Trim whitespace */
+    while (g_ascii_isspace(*line_text)) line_text++;
+
+    /* Check for exactly three dashes (CommonMark standard) */
+    return (g_str_has_prefix(line_text, "---") &&
+            (line_text[3] == '\0' || g_ascii_isspace(line_text[3])));
+}
+
+/* Check if a line contains a completed list item */
+static gboolean is_completed_list_item(const gchar *line_text)
+{
+    if (!line_text) return FALSE;
+
+    /* Trim leading whitespace */
+    while (g_ascii_isspace(*line_text)) line_text++;
+
+    /* Check for unordered list: - or * followed by space */
+    if ((*line_text == '-' || *line_text == '*') &&
+        line_text[1] == ' ') {
+        return TRUE;
+    }
+
+    /* Check for ordered list: digit(s) followed by . and space */
+    if (g_ascii_isdigit(*line_text)) {
+        const gchar *p = line_text;
+        while (g_ascii_isdigit(*p)) p++;
+        return (*p == '.' && *(p+1) == ' ');
+    }
+
+    return FALSE;
+}
+
+/* Get the current line text around the cursor */
+static gchar* get_current_line_text(GtkTextBuffer *buffer, const GtkTextIter *iter)
+{
+    GtkTextIter line_start, line_end;
+
+    /* Get line boundaries */
+    line_start = *iter;
+    gtk_text_iter_set_line_offset(&line_start, 0);
+
+    line_end = line_start;
+    if (!gtk_text_iter_ends_line(&line_end)) {
+        gtk_text_iter_forward_to_line_end(&line_end);
+    }
+
+    return gtk_text_buffer_get_text(buffer, &line_start, &line_end, FALSE);
+}
+
+/* Schedule a line-based reparse for real-time markdown detection */
+static void schedule_line_reparse(GtkTextBuffer *buffer, const GtkTextIter *iter)
+{
+    /* For now, we'll use the existing full reparse mechanism but with a shorter delay */
+    guint existing = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(buffer),
+                                                        DATA_REPARSE_SOURCE_ID));
+    if (existing != 0) {
+        g_source_remove(existing);
+    }
+
+    /* Record target offset */
+    gint target = gtk_text_iter_get_offset((GtkTextIter*)iter);
+    g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_TARGET_OFFSET,
+                     GINT_TO_POINTER(target));
+
+    /* Mark that a user-initiated change has occurred */
+    g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(1));
+
+    /* Use a very short delay for real-time feedback */
+    guint id = g_timeout_add_full(G_PRIORITY_LOW, 50, reparse_markdown_cb,
+                                  g_object_ref(buffer), g_object_unref);
+    g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID, GUINT_TO_POINTER(id));
+}
+
 /* Re-parse the whole buffer using cm_render_markdown_to_buffer */
 static gboolean reparse_markdown_cb(gpointer user_data)
 {
     GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
-    g_debug("[markdown_engine] Reparse callback triggered");
     /* Clear the marker that scheduled us */
     g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID, GUINT_TO_POINTER(0));
 
@@ -141,10 +240,39 @@ void markdown_engine_on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *l
         return;
     }
 
-    /* Avoid reparsing the entire buffer on single keystrokes */
-    if (len == 1) return;
+    /* Handle single character insertions for real-time markdown detection */
+    if (len == 1) {
+        gchar inserted_char = text[0];
 
-    /* Heuristics: Only treat larger insertions (pastes) as requiring reparse */
+        /* Check for markdown completion triggers */
+        if (inserted_char == ' ' || inserted_char == '-') {
+            g_autofree gchar *line_text = get_current_line_text(buffer, location);
+
+            if (line_text) {
+                gboolean should_reparse = FALSE;
+
+                /* Check for completed markdown patterns */
+                if (inserted_char == ' ') {
+                    /* Space might complete heading (# ) or list item (- ) */
+                    should_reparse = is_completed_heading(line_text) ||
+                                   is_completed_list_item(line_text);
+                } else if (inserted_char == '-') {
+                    /* Dash might complete horizontal rule (---) */
+                    should_reparse = is_completed_hr(line_text);
+                }
+
+                if (should_reparse) {
+                    schedule_line_reparse(buffer, location);
+                    return;
+                }
+            }
+        }
+
+        /* No markdown pattern detected, no reparse needed */
+        return;
+    }
+
+    /* Handle multi-character insertions (pastes) */
     gboolean looks_like_paste = (len > 8);
     if (!looks_like_paste) {
         /* Consider multi-character insertion containing newlines as paste */
@@ -155,6 +283,7 @@ void markdown_engine_on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *l
             }
         }
     }
+
     if (looks_like_paste) {
         /* Mark that a user-initiated change has occurred before reparse */
         g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(1));

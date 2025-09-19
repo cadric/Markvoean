@@ -20,6 +20,7 @@
 #include <gtktext/ui/file_actions.h>
 #include <gtktext/ui/event_handlers.h>
 #include <gtktext/ui/status_manager.h>
+#include <gtktext/render/markdown/markdown_engine.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Internal type definitions
@@ -232,6 +233,9 @@ static GtkWidget *create_text_editor_widget(TabDocument *td)
     GtkEventController *motion_controller = gtk_event_controller_motion_new();
     g_signal_connect(motion_controller, "motion", G_CALLBACK(event_handlers_on_text_view_motion), td->text_view);
     gtk_widget_add_controller(td->text_view, motion_controller);
+
+    /* Initialize markdown engine for real-time detection */
+    markdown_engine_initialize_buffer(td->buffer, GTK_TEXT_VIEW(td->text_view), NULL);
 
     /* Add WYSIWYG text view to its scrolled window */
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(wysiwyg_scrolled), td->text_view);
