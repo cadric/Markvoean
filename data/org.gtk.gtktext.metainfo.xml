@@ -6,11 +6,11 @@
   <id>org.gtk.gtktext</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>GTKText</name>
-  <summary>Modern markdown editor with live preview</summary>
+  <name>IFG</name>
+  <summary>It format good</summary>
   <description>
     <p>
-      GTKText is a simple yet powerful markdown editor built with GTK4 and libadwaita.
+      IFG is a simple yet powerful markdown editor built with GTK4 and libadwaita.
       It provides a clean, distraction-free writing environment with real-time markdown
       rendering and syntax highlighting.
     </p>
@@ -26,7 +26,7 @@
     </ul>
     <p>
       Perfect for developers, writers, and anyone who works with markdown documents.
-      GTKText follows GNOME design principles and integrates seamlessly with your
+      IFG follows GNOME design principles and integrates seamlessly with your
       desktop environment.
     </p>
   </description>
@@ -46,9 +46,9 @@
   </screenshots>
   -->
 
-  <url type="homepage">https://github.com/example/gtktext</url>
-  <url type="bugtracker">https://github.com/example/gtktext/issues</url>
-  <!-- TODO: Update with actual URLs when available -->
+  <url type="homepage">https://github.com/cadric/Markvoean</url>
+  <url type="bugtracker">https://github.com/cadric/Markvoean/issues</url>
+  <url type="vcs-browser">https://github.com/cadric/Markvoean</url>
 
   <categories>
     <category>Office</category>
@@ -118,10 +118,9 @@
   </releases>
 
   <developer id="org.gtk.gtktext">
-    <name>GTKText Development Team</name>
+    <name>IFG Development Team</name>
   </developer>
-  <update_contact>noreply@example.com</update_contact>
-  <!-- TODO: Update with actual contact when available -->
+  <update_contact>ifg-dev@markvoean.dev</update_contact>
 
   <translation type="gettext">gtktext</translation>
 

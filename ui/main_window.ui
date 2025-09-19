@@ -6,10 +6,10 @@
   <requires lib="gtk" version="4.0"/>
   <requires lib="libadwaita" version="1.0"/>
   <object class="AdwApplicationWindow" id="main_window">
-    <property name="title" translatable="yes">GTKText</property>
+    <property name="title" translatable="yes">IFG</property>
     <!-- Window size managed programmatically with GSettings persistence -->
     <accessibility>
-      <property name="label" translatable="yes">GTKText main window</property>
+      <property name="label" translatable="yes">IFG main window</property>
       <property name="description" translatable="yes">Main application window for editing markdown documents</property>
     </accessibility>
     <child>
@@ -158,7 +158,7 @@
         <attribute name="action">app.shortcuts</attribute>
       </item>
       <item>
-        <attribute name="label" translatable="yes">_About GTKText</attribute>
+        <attribute name="label" translatable="yes">_About IFG</attribute>
         <attribute name="action">app.about</attribute>
       </item>
     </section>

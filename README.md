@@ -1,4 +1,5 @@
-# GTKText
+# IFG
+*It format good*
 
 A simple text editor with Markdown support built with GTK4 and libadwaita.
 

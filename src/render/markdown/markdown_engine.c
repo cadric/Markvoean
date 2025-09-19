@@ -32,6 +32,7 @@ static const char *DATA_REPARSE_TARGET_OFFSET = "gtktext-reparse-target-offset";
 static gboolean reparse_markdown_cb(gpointer user_data)
 {
     GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
+    g_debug("[markdown_engine] Reparse callback triggered");
     /* Clear the marker that scheduled us */
     g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID, GUINT_TO_POINTER(0));
 
@@ -83,6 +84,10 @@ static gboolean reparse_markdown_cb(gpointer user_data)
 
     /* Re-enable scheduling */
     g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(0));
+
+    /* Clear user change pending flag */
+    g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(0));
+
     return G_SOURCE_REMOVE;
 }
 
@@ -151,6 +156,9 @@ void markdown_engine_on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *l
         }
     }
     if (looks_like_paste) {
+        /* Mark that a user-initiated change has occurred before reparse */
+        g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(1));
+
         schedule_reparse_markdown(buffer, len, location);
     }
 }

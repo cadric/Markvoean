@@ -2,9 +2,9 @@
 # Changed: Enhanced with modern GNOME features and proper application ID
 [Desktop Entry]
 Type=Application
-Name=GTKText
+Name=IFG
 GenericName=Text Editor
-Comment=Modern markdown editor with live preview
+Comment=It format good
 Icon=org.gtk.gtktext
 Exec=gtktext %F
 Terminal=false

@@ -1,6 +1,6 @@
 #!/bin/bash
 # [0.2.0] - 2025-09-15 - build-and-run.sh
-# Added: Convenience script to compile, test, and launch GTKText.
+# Added: Convenience script to compile, test, and launch IFG.
 
 set -e  # Exit on any error
 
@@ -9,7 +9,7 @@ BUILD_DIR="$PROJECT_ROOT/builddir"
 EXECUTABLE="$BUILD_DIR/src/gtktext"
 SCHEMA_DIR="$PROJECT_ROOT/data"
 
-echo "🔧 Building GTKText..."
+echo "🔧 Building IFG..."
 meson compile -C "$BUILD_DIR"
 
 echo "🧪 Running tests..."
@@ -21,7 +21,7 @@ if [ ! -f "$SCHEMA_DIR/gschemas.compiled" ] || [ "$SCHEMA_DIR/org.gtk.gtktext.gs
     glib-compile-schemas "$SCHEMA_DIR"
 fi
 
-echo "🚀 Launching GTKText with Wayland backend (policy compliant)..."
+echo "🚀 Launching IFG with Wayland backend (policy compliant)..."
 echo "   Executable: $EXECUTABLE"
 echo "   Schema dir: $SCHEMA_DIR"
 echo "   Backend: Wayland (enforced)"

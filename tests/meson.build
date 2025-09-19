@@ -12,6 +12,7 @@ lib_sources = [
   '../src/render/markdown/cmrender.c',
   '../src/render/markdown/tag_manager.c',
   '../src/render/visual/theme_styles.c',
+  '../src/render/visual/hr_widget.c',
   '../src/components/toolbar/toolbar.c',
   '../src/core/settings.c',
   '../src/core/util.c',

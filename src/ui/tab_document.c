@@ -18,8 +18,8 @@
 #include <gtktext/editor/buffer_manager.h>
 #include <gtktext/ui/tab_manager.h>
 #include <gtktext/ui/file_actions.h>
-#include <gtktext/ui/status_manager.h>
 #include <gtktext/ui/event_handlers.h>
+#include <gtktext/ui/status_manager.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Internal type definitions
@@ -120,23 +120,26 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
     }
 }
 
-static void on_buffer_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, gpointer user_data)
+static void on_buffer_changed(GtkTextBuffer *buffer, gpointer user_data)
 {
     TabDocument *td = (TabDocument *)user_data;
     if (td && !td->is_welcome) {
         gboolean was_dirty = td->is_dirty;
 
+        /* Check if there's a pending user change that should force dirty state */
+        gboolean user_change_pending = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer),
+                                                                         "gtktext-user-change-pending")) != 0;
+
         /* Sync with DocumentManager state if available */
         gboolean is_now_dirty = TRUE;  /* Default assumption */
         if (td->doc_manager) {
-            /* Check if DocumentManager considers this dirty */
-            is_now_dirty = document_manager_has_unsaved_changes(td->doc_manager);
+            /* Check if DocumentManager considers this dirty, or if user change is pending */
+            is_now_dirty = document_manager_has_unsaved_changes(td->doc_manager) || user_change_pending;
         }
 
         td->is_dirty = is_now_dirty;
 
-        g_debug("TabDocument buffer changed: was_dirty=%s, now_dirty=%s, callback=%p",
-               was_dirty ? "TRUE" : "FALSE", is_now_dirty ? "TRUE" : "FALSE", td->dirty_state_callback);
+
 
         /* Phase 3: Notify callback if dirty state changed */
         if (was_dirty != is_now_dirty && td->dirty_state_callback) {
@@ -164,6 +167,35 @@ static void on_source_buffer_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, gpoint
     }
 }
 
+/* Document manager state change callback that syncs with tab document */
+static void on_document_manager_state_changed(DocumentManager *dm, DocumentState old_state,
+                                             DocumentState new_state, gpointer user_data)
+{
+    TabDocument *td = user_data;
+    g_return_if_fail(td != NULL);
+
+    /* Update tab document dirty state to match document manager */
+    gboolean new_dirty = (new_state == DOC_STATE_DIRTY || new_state == DOC_STATE_DRAFT);
+    gboolean was_dirty = td->is_dirty;
+    td->is_dirty = new_dirty;
+
+
+    /* Update status bar through the standard mechanism */
+    GtkWidget *window = gtk_widget_get_ancestor(td->container, GTK_TYPE_WINDOW);
+    if (window) {
+        GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
+        if (app) {
+            const gchar *file_path = document_manager_get_file_path(dm);
+            status_manager_update_status_bar_for_state(app, new_state, file_path);
+        }
+    }
+
+    /* Notify tab document dirty state callback if state changed */
+    if (was_dirty != new_dirty && td->dirty_state_callback) {
+        td->dirty_state_callback(td, new_dirty, td->dirty_state_callback_data);
+    }
+}
+
 static GtkWidget *create_text_editor_widget(TabDocument *td)
 {
     /* Create a stack to hold both WYSIWYG and source views */
@@ -188,6 +220,19 @@ static GtkWidget *create_text_editor_widget(TabDocument *td)
 
     td->buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(td->text_view));
 
+    /* Set up event controllers for zoom and interactions */
+    GtkEventController *key_controller = gtk_event_controller_key_new();
+    g_signal_connect(key_controller, "key-pressed", G_CALLBACK(event_handlers_on_key_pressed), td->text_view);
+    gtk_widget_add_controller(td->text_view, key_controller);
+
+    GtkEventController *scroll_controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(scroll_controller, "scroll", G_CALLBACK(event_handlers_on_scroll_event), td->text_view);
+    gtk_widget_add_controller(td->text_view, scroll_controller);
+
+    GtkEventController *motion_controller = gtk_event_controller_motion_new();
+    g_signal_connect(motion_controller, "motion", G_CALLBACK(event_handlers_on_text_view_motion), td->text_view);
+    gtk_widget_add_controller(td->text_view, motion_controller);
+
     /* Add WYSIWYG text view to its scrolled window */
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(wysiwyg_scrolled), td->text_view);
 
@@ -207,6 +252,15 @@ static GtkWidget *create_text_editor_widget(TabDocument *td)
     gtk_text_view_set_top_margin(GTK_TEXT_VIEW(td->source_text_view), 12);
     gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(td->source_text_view), 12);
     gtk_widget_add_css_class(td->source_text_view, "monospace");
+
+    /* Set up event controllers for source text view */
+    GtkEventController *source_key_controller = gtk_event_controller_key_new();
+    g_signal_connect(source_key_controller, "key-pressed", G_CALLBACK(event_handlers_on_key_pressed), td->source_text_view);
+    gtk_widget_add_controller(td->source_text_view, source_key_controller);
+
+    GtkEventController *source_scroll_controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(source_scroll_controller, "scroll", G_CALLBACK(event_handlers_on_scroll_event), td->source_text_view);
+    gtk_widget_add_controller(td->source_text_view, source_scroll_controller);
 
     /* Add source text view to its scrolled window */
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(source_scrolled), td->source_text_view);
@@ -311,7 +365,7 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
             DocumentState current_state = document_manager_get_state(td->doc_manager);
             g_debug("DocumentManager final state before callback setup: %d", current_state);
 
-            document_manager_set_state_callback(td->doc_manager, event_handlers_on_document_state_changed, app);
+            document_manager_set_state_callback(td->doc_manager, on_document_manager_state_changed, td);
             g_debug("Set up state change callback for TabDocument DocumentManager");
 
             /* Immediately update status bar with the correct current state */
@@ -377,12 +431,12 @@ TabDocument *tab_document_new_welcome(void)
     gtk_widget_set_margin_end(welcome_content, 48);
 
     /* App title */
-    GtkWidget *title = gtk_label_new(_("GTK Text Editor"));
+    GtkWidget *title = gtk_label_new(_("IFG"));
     gtk_widget_add_css_class(title, "title-1");
     gtk_box_append(GTK_BOX(welcome_content), title);
 
     /* Subtitle */
-    GtkWidget *subtitle = gtk_label_new(_("A simple markdown editor"));
+    GtkWidget *subtitle = gtk_label_new(_("It format good"));
     gtk_widget_add_css_class(subtitle, "title-3");
     gtk_widget_add_css_class(subtitle, "dim-label");
     gtk_box_append(GTK_BOX(welcome_content), subtitle);

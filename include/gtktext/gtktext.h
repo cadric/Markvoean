@@ -1,5 +1,5 @@
 /* [0.2.0] - 2025-09-15 - include/gtktext/gtktext.h
- * Added: Main public API header for GTKText application.
+ * Added: Main public API header for IFG application.
  */
 #ifndef GTKTEXT_H
 #define GTKTEXT_H

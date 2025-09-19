@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script to install dependencies for GTKText
+# Script to install dependencies for IFG
 
 echo "Detecting Linux distribution..."
 

@@ -2,7 +2,7 @@
 # Changed: Enhanced GNOME compliance - AppStream metadata, application ID consistency, modern desktop file
 
 project('gtktext', 'c',
-  version: '1.3.3',
+  version: '1.4.1',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

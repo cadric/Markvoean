@@ -1,53 +1,60 @@
-/* C ULTRA‑MIN TEMPLATE
+/* C ULTRA-MIN TEMPLATE
    Purpose: CommonMark markdown rendering engine with GTK text buffer integration
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   TODO: Restructure to follow Ultra-Min template sections
-   [0.3.4] Fixed heading formatting to preserve tight spacing between consecutive headings
+   [1.3.8] - 2025-09-18 - render/markdown/cmrender.c
+   Changed: Restructured to follow Ultra-Min template sections for better organization
 */
-/* [1.0.1] - 2025-09-16 - src/cmrender.c
-   MAJOR RELEASE: Fixed segfault in image widget handling using weak references
- * Changed: Added proper input validation with g_return_if_fail().
- */
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <gtktext/render/cmrender.h>
 #include <gtktext/render/tag_manager.h>
 #include <gtktext/render/theme_styles.h>
-// #include "gtktext_cmark.h" // Removed as per plan
-#include <adwaita.h> // For AdwStyleManager
-#include <gtk/gtk.h> // Include full gtk.h for all required functions
-#include <libsoup/soup.h> // For image fetching
+#include <gtktext/render/hr_widget.h>
+#include <adwaita.h>
+#include <gtk/gtk.h>
+#include <libsoup/soup.h>
 #include <string.h>
 #include <stdio.h>
-#include <cmark.h> // Ensure cmark functions are declared
+#include <cmark.h>
 
-// Forward declare the image fetch callback type to match main.c pattern
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * META - Forward declarations and macros
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
 typedef void (*ImageFetchCallback)(GdkPixbuf *pixbuf, GError *error, gpointer user_data);
 
-// Fast qdata keys for tag name and tag cache
-static GQuark quark_tag_name = 0;
-static GQuark quark_tag_cache = 0;
+#define CMRENDER_UNUSED __attribute__((unused))
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * TYPES - Data structures and type definitions
+ * ═══════════════════════════════════════════════════════════════════════════════ */
 
-// Structure to hold parameters needed for immediate image fetching during rendering
 typedef struct {
     SoupSession *soup_session;
     GtkTextView *text_view;
 } ImageFetchContext;
 
-// Global context for image fetching during rendering
-static ImageFetchContext *g_image_fetch_context = NULL;
-// Whether to use visual bullets (●/○/■) for unordered lists.
-// Enabled when rendering in the app (text_view != NULL); disabled in headless tests.
-static gboolean g_use_visual_bullets = TRUE;
-
-// Helper structure for image widget async operations
 typedef struct {
-    GWeakRef picture_ref;  // Use weak reference to avoid dangling pointers
+    GWeakRef picture_ref;
     char *url;
     char *alt_text;
 } ImageWidgetData;
 
-// Macro to silence unused variable warnings (if needed, or manage via compiler flags)
-#define CMRENDER_UNUSED __attribute__((unused))
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * STATE - Global state and caching
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+static GQuark quark_tag_name = 0;
+static GQuark quark_tag_cache = 0;
+static ImageFetchContext *g_image_fetch_context = NULL;
+static gboolean g_use_visual_bullets = TRUE;
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * HELPERS - Internal utility functions
+ * ═══════════════════════════════════════════════════════════════════════════════ */
 
 // Function to free tag cache structure
 static void tag_cache_free(gpointer p)
@@ -268,7 +275,7 @@ static GtkWidget *create_image_widget(const char *alt_text, const char *url,
         if (msg) {
             // Set user agent and accept headers like the existing code
             SoupMessageHeaders *headers = soup_message_get_request_headers(msg);
-            soup_message_headers_replace(headers, "User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 GTKText/0.1");
+            soup_message_headers_replace(headers, "User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 IFG/0.1");
             soup_message_headers_replace(headers, "Accept", "image/*,*/*;q=0.5");
             
             // Create callback data
@@ -465,6 +472,10 @@ static void update_blockquote_tag(GtkTextTag *tag, gpointer user_data) {
                  "background", NULL,            // Explicitly clear text background
                  NULL);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * HANDLERS - Public API functions and event handlers
+ * ═══════════════════════════════════════════════════════════════════════════════ */
 
 void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
@@ -986,24 +997,70 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
             }
             return; // HTML block content is literal.
         case CMARK_NODE_THEMATIC_BREAK:
-            // Unify HR handling: insert a full-width line and apply the "hr" tag so export can detect it.
+            // Insert proper GTK widget-based HR that resizes with window
             // Ensure HR starts at a new line
             if (!gtk_text_iter_starts_line(iter)) {
                 gtk_text_buffer_insert(buffer, iter, "\n", -1);
             }
-            cm_render_get_or_create_base_tag(buffer, "hr");
-            {
-                char *temp_hr = g_strdup("hr");
-                GSList *tags_for_hr = g_slist_prepend(active_tags, temp_hr); // Apply hr plus any surrounding blockquote tags
-                
-                // Insert a line of em-dashes for better visual effect, but keep export-friendly content
-                // Use Unicode em-dash (U+2014) repeated to create a full line effect
-                const char *hr_visual = "────────────────────────────────────────────────────────────────────────────────";
-                cm_render_insert_with_active_tags(buffer, iter, hr_visual, tags_for_hr);
-                g_free(tags_for_hr->data);
-                g_slist_free_1(tags_for_hr);
+
+            // Insert HR marker text first for export detection
+            GtkTextTag *hr_tag = tag_manager_get_or_create_base_tag(buffer, "hr");
+            if (hr_tag) {
+                // Insert visible marker that will be replaced by widget
+                tag_manager_insert_with_active_tags(buffer, iter, "---", NULL);
+
+                // Apply HR tag to the inserted text for export detection
+                GtkTextIter start_mark, end_mark;
+                gtk_text_buffer_get_iter_at_offset(buffer, &start_mark,
+                    gtk_text_iter_get_offset(iter) - 3);
+                end_mark = *iter;
+                gtk_text_buffer_apply_tag(buffer, hr_tag, &start_mark, &end_mark);
             }
-            // Do not return; allow block-level newline handling below
+
+            // Now create the widget anchor to replace the text
+            GtkTextIter hr_start, hr_end;
+            gtk_text_buffer_get_iter_at_offset(buffer, &hr_start, gtk_text_iter_get_offset(iter) - 3);
+            hr_end = *iter;
+
+            // Delete the text and insert widget anchor
+            gtk_text_buffer_delete(buffer, &hr_start, &hr_end);
+
+            // Create HR widget with theme-aware styling
+            GtkWidget *hr_widget = gtktext_hr_widget_new();
+            if (!hr_widget) {
+                g_warning("Failed to create HR widget");
+                break;
+            }
+
+            GdkRGBA hr_color;
+            if (theme_styles_get_color_with_alpha(NULL, "theme_fg_color", 0.3, &hr_color)) {
+                gtktext_hr_widget_set_color(GTKTEXT_HR_WIDGET(hr_widget), &hr_color);
+            }
+
+            // Create widget anchor at the HR position
+            GtkTextChildAnchor *anchor = gtk_text_buffer_create_child_anchor(buffer, &hr_start);
+            if (anchor && G_IS_OBJECT(hr_widget)) {
+                // Take a reference for storing in the anchor data
+                g_object_ref_sink(hr_widget); // Convert floating reference to normal reference
+                g_object_set_data_full(G_OBJECT(anchor), "hr-widget", hr_widget, (GDestroyNotify)g_object_unref);
+            } else {
+                g_warning("Failed to create anchor or invalid widget");
+                // If hr_widget is floating, sink and unref; if not floating, just unref
+                if (hr_widget) {
+                    g_object_ref_sink(hr_widget);
+                    g_object_unref(hr_widget);
+                }
+            }
+
+            // Also store HR tag for export
+            if (hr_tag) {
+                g_object_set_data(G_OBJECT(anchor), "hr-tag", hr_tag);
+            }
+
+            // Update iter to position after anchor and add newline
+            *iter = hr_start;
+            gtk_text_iter_forward_char(iter); // Move past the anchor
+            gtk_text_buffer_insert(buffer, iter, "\n", -1);
             break;
         case CMARK_NODE_PARAGRAPH:
             // Paragraphs themselves don't add a tag, but they manage spacing.
@@ -1361,8 +1418,30 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     // Skip during headless tests where no Gtk initialization is present.
     if (text_view) {
         cm_render_update_theme_dependent_tags(buffer);
+
+        // 6. Attach HR widgets to text view
+        GtkTextIter start_iter, end_iter;
+        gtk_text_buffer_get_bounds(buffer, &start_iter, &end_iter);
+
+        GtkTextIter iter = start_iter;
+        while (!gtk_text_iter_equal(&iter, &end_iter)) {
+            GtkTextChildAnchor *anchor = gtk_text_iter_get_child_anchor(&iter);
+            if (anchor) {
+                GtkWidget *hr_widget = g_object_get_data(G_OBJECT(anchor), "hr-widget");
+                if (hr_widget && GTKTEXT_IS_HR_WIDGET(hr_widget)) {
+                    gtk_text_view_add_child_at_anchor(text_view, hr_widget, anchor);
+
+                    // Update widget color to match current theme
+                    GdkRGBA hr_color;
+                    if (theme_styles_get_color_with_alpha(NULL, "theme_fg_color", 0.3, &hr_color)) {
+                        gtktext_hr_widget_set_color(GTKTEXT_HR_WIDGET(hr_widget), &hr_color);
+                    }
+                }
+            }
+            if (!gtk_text_iter_forward_char(&iter)) break;
+        }
     }
-    
+
     // Ensure buffer ends with a newline if it's not empty, for consistent spacing.
     // This might be too aggressive, consider if it's truly needed.
     // gtk_text_buffer_get_end_iter(buffer, &iter);
@@ -1444,20 +1523,35 @@ char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
     while(!gtk_text_iter_is_end(&iter)) {
         gunichar current_char = gtk_text_iter_get_char(&iter);
 
-        // Check for child anchors (embedded widgets like images)
+        // Check for child anchors (embedded widgets like images or HR)
         GtkTextChildAnchor *child_anchor = gtk_text_iter_get_child_anchor(&iter);
         if (child_anchor) {
+            // First check if this is an HR anchor
+            if (g_object_get_data(G_OBJECT(child_anchor), "hr-widget")) {
+                // This is an HR widget anchor, export as horizontal rule
+                g_string_append(md, "---\n");
+                gtk_text_iter_forward_char(&iter);
+                continue;
+            }
+
             // Get the widgets attached to this anchor
             guint widget_count = 0;
             GtkWidget **widgets = gtk_text_child_anchor_get_widgets(child_anchor, &widget_count);
-            
+
             for (guint i = 0; i < widget_count; i++) {
                 GtkWidget *widget = widgets[i];
-                
+
+                // Check if this is an HR widget
+                if (GTKTEXT_IS_HR_WIDGET(widget)) {
+                    // Export as horizontal rule
+                    g_string_append(md, "---\n");
+                    break; // Only one HR per anchor
+                }
+
                 // Check if this is an image widget (should be a box containing our image)
                 const char *image_url = g_object_get_data(G_OBJECT(widget), "image-url");
                 const char *image_alt = g_object_get_data(G_OBJECT(widget), "image-alt");
-                
+
                 if (image_url) {
                     // This is an image widget, generate markdown
                     g_debug("[export] Found image widget with URL: %s, alt: %s", 

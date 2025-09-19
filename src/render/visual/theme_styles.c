@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Theme-aware styling for markdown rendering
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.1] - 2025-09-16 - render/visual/theme_styles.c
-   Changed: Extracted theme styling from cmrender.c for better organization
+   [1.3.8] - 2025-09-18 - render/visual/theme_styles.c
+   Changed: Enhanced to support theme updates for all markdown elements (code, headings, hr, etc.)
 */
 
 #ifdef HAVE_CONFIG_H
@@ -80,9 +80,9 @@ gboolean theme_styles_get_color_with_alpha(GtkWidget *widget, const char *color_
 }
 
 /**
- * Update a single blockquote tag with theme colors
+ * Update a single tag with theme colors based on its type
  */
-void theme_styles_update_blockquote_tag(GtkTextTag *tag, gpointer user_data)
+static void theme_styles_update_single_tag(GtkTextTag *tag, gpointer user_data)
 {
     (void)user_data;
 
@@ -90,20 +90,51 @@ void theme_styles_update_blockquote_tag(GtkTextTag *tag, gpointer user_data)
 
     gchar *tag_name = NULL;
     g_object_get(tag, "name", &tag_name, NULL);
-    if (!tag_name || !g_str_has_prefix(tag_name, "blockquote")) {
-        g_free(tag_name);
-        return;
+    if (!tag_name) return;
+
+    GdkRGBA color;
+
+    /* Update blockquote tags */
+    if (g_str_has_prefix(tag_name, "blockquote")) {
+        if (theme_styles_get_color_with_alpha(NULL, "accent", 0.1, &color)) {
+            g_object_set(tag, "background-rgba", &color, NULL);
+        }
     }
+    /* Update code tags (inline code) */
+    else if (g_strcmp0(tag_name, "code") == 0) {
+        if (theme_styles_get_color_with_alpha(NULL, "theme_bg_color", 0.8, &color)) {
+            g_object_set(tag, "background-rgba", &color, NULL);
+        }
+    }
+    /* Update code block tags */
+    else if (g_strcmp0(tag_name, "codeblock") == 0 || g_strcmp0(tag_name, "codeblock_indented") == 0) {
+        if (theme_styles_get_color_with_alpha(NULL, "theme_bg_color", 0.6, &color)) {
+            g_object_set(tag, "background-rgba", &color, NULL);
+        }
+    }
+    /* Update horizontal rule tags */
+    else if (g_strcmp0(tag_name, "hr") == 0) {
+        if (theme_styles_get_color_with_alpha(NULL, "theme_fg_color", 0.3, &color)) {
+            g_object_set(tag, "foreground-rgba", &color, NULL);
+        }
+    }
+    /* Update heading tags with accent colors */
+    else if (g_str_has_prefix(tag_name, "h") && g_utf8_strlen(tag_name, -1) == 2 &&
+             tag_name[1] >= '1' && tag_name[1] <= '6') {
+        if (theme_styles_get_color_with_alpha(NULL, "accent", 1.0, &color)) {
+            g_object_set(tag, "foreground-rgba", &color, NULL);
+        }
+    }
+
     g_free(tag_name);
+}
 
-    /* Set theme-aware background color for blockquotes */
-    GdkRGBA bg_color;
-    if (theme_styles_get_color_with_alpha(NULL, "theme_bg_color", 0.1, &bg_color)) {
-        g_object_set(tag, "background-rgba", &bg_color, NULL);
-    }
-
-    /* Set theme-aware left margin */
-    g_object_set(tag, "left-margin", 20, NULL);
+/**
+ * Update a single blockquote tag with theme colors (legacy function for compatibility)
+ */
+void theme_styles_update_blockquote_tag(GtkTextTag *tag, gpointer user_data)
+{
+    theme_styles_update_single_tag(tag, user_data);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -120,8 +151,6 @@ void theme_styles_update_theme_dependent_tags(GtkTextBuffer *buffer)
     GtkTextTagTable *table = gtk_text_buffer_get_tag_table(buffer);
     if (!table) return;
 
-    /* Update all blockquote tags */
-    gtk_text_tag_table_foreach(table, theme_styles_update_blockquote_tag, NULL);
-
-    /* TODO: Add other theme-dependent tag updates here as needed */
+    /* Update all theme-dependent tags (blockquotes, code, headings, hr, etc.) */
+    gtk_text_tag_table_foreach(table, theme_styles_update_single_tag, NULL);
 }

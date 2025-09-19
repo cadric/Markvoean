@@ -1,6 +1,6 @@
 #!/bin/bash
 # [0.2.0] - 2025-09-15 - run.sh
-# Added: Quick run script for GTKText.
+# Added: Quick run script for IFG.
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 EXECUTABLE="$PROJECT_ROOT/builddir/src/gtktext"
@@ -12,6 +12,6 @@ if [ ! -f "$SCHEMA_DIR/gschemas.compiled" ] || [ "$SCHEMA_DIR/org.gtk.gtktext.gs
     glib-compile-schemas "$SCHEMA_DIR"
 fi
 
-echo "🚀 Launching GTKText with Wayland backend (policy compliant)..."
+echo "🚀 Launching IFG with Wayland backend (policy compliant)..."
 # Enforce Wayland-only policy as per CLAUDE.md guidelines
 GDK_BACKEND=wayland GSETTINGS_SCHEMA_DIR="$SCHEMA_DIR" exec "$EXECUTABLE" "$@"

@@ -2,8 +2,8 @@
 # Changed: Added version header tracking.
 [Desktop Entry]
 Type=Application
-Name=GTKText
-Comment=A simple text editor with Markdown support
+Name=IFG
+Comment=It format good
 Icon=gtktext
 Exec=gtktext
 Terminal=false

@@ -39,9 +39,10 @@ void app_action_about_cb(GSimpleAction *action, GVariant *parameter, gpointer us
     GtkWindow *parent = gtk_application_get_active_window(app);
     if (!parent) return;
     AdwDialog *about = adw_about_dialog_new();
-    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), _("GTKText"));
+    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), _("IFG"));
+    adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(about), _("It format good"));
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), "gtktext");
-    adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(about), "GTKText Authors");
+    adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(about), "IFG Authors");
     adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "1.0.0");
     adw_dialog_present(about, GTK_WIDGET(parent));
 }

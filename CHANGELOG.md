@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 🏆 Modularization Journey Summary
 
-**Versions 1.0.1 through 1.0.8** represent a comprehensive modularization effort that transformed GTKText from a monolithic architecture to a modern, component-based system:
+**Versions 1.0.1 through 1.0.8** represent a comprehensive modularization effort that transformed IFG from a monolithic architecture to a modern, component-based system:
 
 - **Starting Point**: 2829-line main.c (monolithic, hard to maintain)
 - **Final Result**: 236-line main.c (focused coordination layer)
@@ -16,6 +16,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Functionality**: 100% preserved with enhanced stability and maintainability
 
 This transformation provides a solid foundation for future development and collaborative work.
+
+## [1.4.1] - 2025-09-18
+
+### Fixed
+- **🚨 CRITICAL BUG FIX** - Fixed iterator invalidation crash in HR widget implementation
+  - Resolved GTK text buffer iterator crashes that caused segmentation faults
+  - Fixed "Invalid text buffer iterator" warnings and critical assertions
+  - Improved HR widget anchor handling with proper iterator management
+  - Enhanced export functionality to properly handle HR widget anchors
+  - Application now runs stable without crashes when rendering horizontal rules
+
+## [1.4.0] - 2025-09-18
+
+### Added
+- **🔧 PROPER HR RENDERING** - Implemented GTK widget-based horizontal rules
+  - Created custom `GtktextHRWidget` that renders as proper GTK widget
+  - Replaced problematic Unicode character lines (────) with resizable widgets
+  - HR now properly adapts to window width without creating horizontal scrollbars
+  - Theme-aware coloring that automatically updates with light/dark mode
+  - Maintains markdown export compatibility (exports as `---`)
+  - No more layout issues on window resize or small windows
+
+## [1.3.9] - 2025-09-18
+
+### Enhanced
+- **🎨 THEME SYSTEM** - Enhanced theme-dependent styling for all markdown elements
+  - Added theme-aware colors for inline code (subtle background)
+  - Added theme-aware colors for code blocks (stronger background)
+  - Added theme-aware colors for horizontal rules (muted foreground)
+  - Added theme-aware accent colors for headings (h1-h6)
+  - Improved blockquote styling with accent color backgrounds
+  - Unified theme update system for all tag types in one function
+  - Removed completed TODO comment about additional theme updates
+
+## [1.3.8] - 2025-09-18
+
+### Changed
+- **📋 CODE ORGANIZATION** - Restructured cmrender.c to follow Ultra-Min template sections
+  - Organized file with proper META • TYPES • STATE • HELPERS • HANDLERS sections
+  - Improved code readability and maintainability
+  - Added section headers with visual separators for better navigation
+  - Removed completed TODO comment about template restructuring
+
+## [1.3.7] - 2025-09-18
+
+### Fixed
+- **🔗 APPSTREAM METADATA** - Updated AppStream metadata with correct project URLs
+  - Updated homepage URL to actual GitHub repository: https://github.com/cadric/Markvoean
+  - Updated bug tracker URL to GitHub issues
+  - Added VCS browser URL for source code access
+  - Updated contact email to project-specific address
+  - Removed TODO comments for completed metadata updates
+
+## [1.3.6] - 2025-09-18
+
+### Fixed
+- **📱 WELCOME SCREEN BRANDING** - Fixed welcome screen text to show correct IFG branding
+  - Updated welcome screen title from "GTK Text Editor" to "IFG"
+  - Updated welcome screen subtitle from "A simple markdown editor" to "It format good"
+  - Ensured consistent branding across all application components
+
+## [1.3.5] - 2025-09-18
+
+### Changed
+- **🔤 BRAND CORRECTION** - Fixed application name from ISG to IFG
+  - Corrected all instances of "ISG" to "IFG" throughout the codebase
+  - Updated desktop files, metadata, UI components, and documentation
+  - Maintained subtitle "It format good"
+
+## [1.3.4] - 2025-09-18
+
+### Changed
+- **🎨 COMPLETE REBRANDING** - Application renamed from GTKText to IFG
+  - Updated application name to "IFG" with subtitle "It format good"
+  - Changed all user-facing text, window titles, and about dialog
+  - Updated desktop file entries and application metadata
+  - Refreshed documentation, scripts, and translation templates
+  - Maintained technical consistency across all components
 
 ## [1.3.3] - 2025-09-18
 
@@ -176,7 +254,7 @@ This transformation provides a solid foundation for future development and colla
 
 **MAJOR ACHIEVEMENT: Complete Modularization & Stability Fixes**
 
-This release completes the comprehensive modularization of GTKText, achieving a remarkable 92% reduction in main.c size while resolving critical stability issues.
+This release completes the comprehensive modularization of IFG, achieving a remarkable 92% reduction in main.c size while resolving critical stability issues.
 
 ### Added
 - **Application Initialization Module** (`src/core/app_initialization.c`) - Complete UI setup and initialization

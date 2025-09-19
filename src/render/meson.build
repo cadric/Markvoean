@@ -18,7 +18,8 @@ render_sources += files(
 
 # Visual rendering modules
 render_sources += files(
-  'visual/theme_styles.c'
+  'visual/theme_styles.c',
+  'visual/hr_widget.c'
 )
 
 # Export sources for parent build

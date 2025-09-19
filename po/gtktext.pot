@@ -40,7 +40,7 @@ msgid "Save Markdown File"
 msgstr ""
 
 #: src/main.c:1300 ui/main_window.ui:9 data/gtktext.desktop.in:5
-msgid "GTKText"
+msgid "IFG"
 msgstr ""
 
 #: src/main.c:2026
@@ -76,7 +76,7 @@ msgid "Autosave delay"
 msgstr ""
 
 #: ui/main_window.ui:13
-msgid "GTKText main window"
+msgid "IFG main window"
 msgstr ""
 
 #: ui/main_window.ui:14
@@ -184,7 +184,7 @@ msgid "_Keyboard Shortcuts"
 msgstr ""
 
 #: ui/main_window.ui:212
-msgid "_About GTKText"
+msgid "_About IFG"
 msgstr ""
 
 #: ui/shortcuts.ui:13 ui/shortcuts.ui:74

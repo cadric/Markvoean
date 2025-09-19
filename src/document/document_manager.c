@@ -748,13 +748,20 @@ gchar* calculate_file_hash(const gchar *path, GError **error)
 
 static void on_buffer_changed(GtkTextBuffer *buffer, gpointer user_data)
 {
-    (void)buffer;
     DocumentManager *dm = user_data;
     g_return_if_fail(dm != NULL);
-    
+    g_return_if_fail(buffer != NULL);
+
+    /* Check if there's a pending user change that should trigger dirty state */
+    gboolean user_change_pending = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer),
+                                                                     "gtktext-user-change-pending")) != 0;
+
     /* Update state to dirty if not already */
-    if (dm->state == DOC_STATE_CLEAN && has_content_changed(dm)) {
-        set_document_state(dm, DOC_STATE_DIRTY);
+    if (dm->state == DOC_STATE_CLEAN) {
+        /* Force dirty state if user change is pending, or check content change normally */
+        if (user_change_pending || has_content_changed(dm)) {
+            set_document_state(dm, DOC_STATE_DIRTY);
+        }
     }
 }
 
