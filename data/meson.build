@@ -53,3 +53,46 @@ install_data('icons/hicolor/scalable/apps/org.gtk.gtktext.svg',
 install_data('icons/hicolor/symbolic/apps/org.gtk.gtktext-symbolic.svg',
   install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'symbolic' / 'apps'
 )
+
+# Custom toolbar icons - symbolic variants for toolbar formatting buttons
+install_data('icons/hicolor/symbolic/apps/horizontal-rule-symbolic.svg',
+  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'symbolic' / 'apps'
+)
+install_data('icons/hicolor/symbolic/apps/inline-code-symbolic.svg',
+  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'symbolic' / 'apps'
+)
+install_data('icons/hicolor/symbolic/apps/code-block-symbolic.svg',
+  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'symbolic' / 'apps'
+)
+install_data('icons/hicolor/symbolic/apps/block-quote-symbolic.svg',
+  install_dir: get_option('datadir') / 'icons' / 'hicolor' / 'symbolic' / 'apps'
+)
+
+# Development icon cache update - copy icons to local cache during build for testing
+# Find icon cache update tools
+gtk4_update_icon_cache = find_program('gtk4-update-icon-cache', required: false)
+gtk_update_icon_cache = find_program('gtk-update-icon-cache', required: false)
+
+# Create custom target to update local icon cache during development
+if gtk4_update_icon_cache.found() or gtk_update_icon_cache.found()
+  update_dev_icons = custom_target('update-dev-icons',
+    input: [
+      'icons/hicolor/symbolic/apps/horizontal-rule-symbolic.svg',
+      'icons/hicolor/symbolic/apps/inline-code-symbolic.svg',
+      'icons/hicolor/symbolic/apps/code-block-symbolic.svg',
+      'icons/hicolor/symbolic/apps/block-quote-symbolic.svg'
+    ],
+    output: 'dev-icons-updated',
+    command: [
+      'sh', '-c', '''
+      mkdir -p "$HOME/.local/share/icons/hicolor/symbolic/apps"
+      cp "@INPUT0@" "@INPUT1@" "@INPUT2@" "@INPUT3@" "$HOME/.local/share/icons/hicolor/symbolic/apps/"
+      ''' + (gtk4_update_icon_cache.found() ?
+        'gtk4-update-icon-cache "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true' :
+        'gtk-update-icon-cache "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true') + '''
+      touch "@OUTPUT@"
+      '''
+    ],
+    build_by_default: true
+  )
+endif

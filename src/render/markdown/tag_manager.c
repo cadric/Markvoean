@@ -14,6 +14,7 @@
 #include <glib.h>
 
 #include <gtktext/render/tag_manager.h>
+#include <gtktext/render/theme_styles.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * STATE - Global state for tag management
@@ -114,38 +115,38 @@ GtkTextTag* tag_manager_get_or_create_base_tag(GtkTextBuffer *buffer, const char
                                              "scale", scale,
                                              NULL);
         } else if (g_strcmp0(tag_name, "code") == 0) {
-            // Basic properties for inline code
+            // Basic properties for inline code - should align with normal text (0px left margin)
             tag = gtk_text_buffer_create_tag(buffer, "code",
                                              "family", "monospace",
                                              "background-full-height", TRUE,
-                                             "left-margin", 4,
-                                             "right-margin", 4,
+                                             "left-margin", 0,
+                                             "right-margin", 0,
                                              "pixels-above-lines", 1,
                                              "pixels-below-lines", 1,
                                              NULL);
         } else if (g_strcmp0(tag_name, "codeblock") == 0) {
-            // Basic properties for fenced code blocks — visual colors are set by theme update.
+            // Basic properties for fenced code blocks — consistent 32px indentation
             tag = gtk_text_buffer_create_tag(buffer, "codeblock",
                                              "family", "monospace",
                                              "background-full-height", FALSE,
                                              "left-margin", 32,
-                                             "right-margin", 12,
+                                             "right-margin", 8,
                                              "pixels-above-lines", 6,
                                              "pixels-below-lines", 6,
                                              "wrap-mode", GTK_WRAP_NONE,
-                                             "indent", 2,
+                                             "indent", 0,
                                              NULL);
         } else if (g_strcmp0(tag_name, "codeblock_indented") == 0) {
-            // Indented code blocks should visually represent the 4+ space indentation
+            // Indented code blocks should visually represent the 4+ space indentation (48px)
             tag = gtk_text_buffer_create_tag(buffer, "codeblock_indented",
                                              "family", "monospace",
                                              "background-full-height", FALSE,
                                              "left-margin", 48,
-                                             "right-margin", 12,
+                                             "right-margin", 8,
                                              "pixels-above-lines", 6,
                                              "pixels-below-lines", 6,
                                              "wrap-mode", GTK_WRAP_NONE,
-                                             "indent", 8,
+                                             "indent", 0,
                                              NULL);
         } else if (g_strcmp0(tag_name, "hr") == 0) {
             // Horizontal rule: create a full-width line effect
@@ -162,7 +163,7 @@ GtkTextTag* tag_manager_get_or_create_base_tag(GtkTextBuffer *buffer, const char
             if (*p >= '1' && *p <= '9') {
                 depth = *p - '0';
             }
-            int left_margin = 20 * depth; // 20 pixels per nesting level
+            int left_margin = 16 * depth; // 16 pixels per nesting level for consistent hierarchy
             tag = gtk_text_buffer_create_tag(buffer, tag_name,
                                              "left-margin", left_margin,
                                              NULL);
@@ -172,6 +173,9 @@ GtkTextTag* tag_manager_get_or_create_base_tag(GtkTextBuffer *buffer, const char
     // 4) Cache the result
     if (tag) {
         g_hash_table_insert(cache->map, g_strdup(tag_name), tag);
+
+        /* Apply theme colors immediately after creating any tag */
+        theme_styles_update_theme_dependent_tags(buffer);
     }
 
     return tag;

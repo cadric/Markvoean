@@ -113,7 +113,11 @@ void http_images_on_http_image_fetched(SoupSession *session, GAsyncResult *res,
                          G_CALLBACK(http_images_on_picture_paintable_notify),
                          g_strdup(ctx->url), http_images_free_user_data_notify, 0);
     g_object_unref(pb);
-    gtk_text_view_add_child_at_anchor(ctx->view, pic, anchor);
+    /* Only add widget if text view is properly allocated to prevent GTK warnings */
+    if (gtk_widget_get_mapped(GTK_WIDGET(ctx->view)) &&
+        gtk_widget_get_width(GTK_WIDGET(ctx->view)) > 1) {
+        gtk_text_view_add_child_at_anchor(ctx->view, pic, anchor);
+    }
     gtk_accessible_update_property(
         GTK_ACCESSIBLE(pic),
         GTK_ACCESSIBLE_PROPERTY_LABEL,

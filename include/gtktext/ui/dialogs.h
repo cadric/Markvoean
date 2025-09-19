@@ -19,8 +19,6 @@ G_BEGIN_DECLS
 
 /* Unsaved changes dialog */
 gboolean dialogs_has_unsaved_changes(GtkTextBuffer *buffer);
-void dialogs_show_unsaved_changes_dialog(GtkWindow *parent, GtkTextBuffer *buffer);
-void dialogs_on_unsaved_changes_dialog_response(AdwAlertDialog *dialog, const char *response, gpointer user_data);
 
 /* Autorecover functionality */
 void dialogs_check_for_autorecover(GtkApplication *app);

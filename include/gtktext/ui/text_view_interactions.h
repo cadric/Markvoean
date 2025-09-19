@@ -16,17 +16,6 @@ G_BEGIN_DECLS
  * PUBLIC API - Text view interaction functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-/**
- * Handle key press events on text view (Ctrl+C, zoom controls, reset)
- * @param controller Event controller
- * @param keyval Key value
- * @param keycode Key code
- * @param state Modifier state
- * @param user_data Text view pointer
- * @return TRUE if handled, FALSE otherwise
- */
-gboolean text_view_on_key_pressed(GtkEventControllerKey *controller, guint keyval,
-                                  guint keycode, GdkModifierType state, gpointer user_data);
 
 /**
  * Handle scroll events on text view (Ctrl+scroll for zoom)

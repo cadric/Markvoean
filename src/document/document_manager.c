@@ -11,6 +11,7 @@
 
 #include <gtktext/document/document_manager.h>
 #include <gtktext/render/cmrender.h>
+#include <gtktext/render/theme_styles.h>
 #include <gtktext/core/util.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
@@ -1127,7 +1128,10 @@ gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
     gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
     gtk_text_buffer_delete(dm->buffer, &start, &end);
     gtk_text_buffer_insert_at_cursor(dm->buffer, content, -1);
-    
+
+    /* Apply theme colors to any existing tags after loading content */
+    theme_styles_update_theme_dependent_tags(dm->buffer);
+
     /* Update document state */
     g_free(dm->file_path);
     dm->file_path = g_strdup(file_path);
@@ -1236,7 +1240,10 @@ gboolean document_manager_open_draft(DocumentManager *dm, const gchar *draft_pat
     gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
     gtk_text_buffer_delete(dm->buffer, &start, &end);
     gtk_text_buffer_insert_at_cursor(dm->buffer, content, -1);
-    
+
+    /* Apply theme colors to any existing tags after loading content */
+    theme_styles_update_theme_dependent_tags(dm->buffer);
+
     /* Update document state */
     g_free(dm->draft_path);
     dm->draft_path = g_strdup(draft_path);
@@ -1373,6 +1380,9 @@ gboolean document_manager_resolve_conflict(DocumentManager *dm,
         gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
         gtk_text_buffer_delete(dm->buffer, &start, &end);
         gtk_text_buffer_insert_at_cursor(dm->buffer, external_content, -1);
+
+        /* Apply theme colors to any existing tags after loading content */
+        theme_styles_update_theme_dependent_tags(dm->buffer);
         
         /* Update metadata and state */
         update_file_metadata(dm);

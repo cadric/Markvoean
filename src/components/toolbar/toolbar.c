@@ -46,8 +46,12 @@ typedef struct {
     GtkHeaderBar *header_bar;
     GtkButton *bold_button;
     GtkButton *italic_button;
+    GtkButton *inline_code_button;
+    GtkButton *code_block_button;
+    GtkButton *blockquote_button;
+    GtkButton *bullet_list_button;
+    GtkButton *numbered_list_button;
     GtkMenuButton *heading_button;
-    GtkButton *code_button;
     GtkButton *hr_button;
     GtkButton *source_view_button;
     ViewMode current_view_mode;
@@ -66,9 +70,13 @@ static ToolbarComponent toolbar_state = { 0 };
 static const ButtonInfo button_info[] = {
     { "bold", "format-text-bold-symbolic", "Fed", "Bold text (Ctrl+B)" },
     { "italic", "format-text-italic-symbolic", "Kursiv", "Italic text (Ctrl+I)" },
-    { "code", "text-x-generic-symbolic", "Kode", "Insert code (Ctrl+`)" },
+    { "inline-code", "inline-code-symbolic", "Inline-kode", "Insert inline code" },
+    { "code-block", "code-block-symbolic", "Kodeblok", "Insert code block" },
+    { "blockquote", "block-quote-symbolic", "CitatBlok", "Insert blockquote" },
+    { "bullet-list", "view-list-bullet-symbolic", "Punktliste", "Insert bullet list" },
+    { "numbered-list", "view-list-ordered-symbolic", "Nummeret liste", "Insert numbered list" },
     { "heading", "font-select-symbolic", "Overskrifter", "Select heading level" },
-    { "hr", "insert-object-symbolic", "HR", "Insert horizontal rule" },
+    { "hr", "horizontal-rule-symbolic", "HR", "Insert horizontal rule" },
     { "source", "format-text-plaintext-symbolic", "Kilde", "Toggle source view" }
 };
 
@@ -103,8 +111,12 @@ static void toolbar_reset(ToolbarComponent *t) {
     t->header_bar = NULL;
     t->bold_button = NULL;
     t->italic_button = NULL;
+    t->inline_code_button = NULL;
+    t->code_block_button = NULL;
+    t->blockquote_button = NULL;
+    t->bullet_list_button = NULL;
+    t->numbered_list_button = NULL;
     t->heading_button = NULL;
-    t->code_button = NULL;
     t->hr_button = NULL;
     t->source_view_button = NULL;
     t->current_view_mode = VIEW_MODE_WYSIWYG;
@@ -306,18 +318,103 @@ static void on_bold_button_clicked(GtkButton *button, gpointer user_data) {
     toggle_tag_on_selection(buffer, "bold", "weight", GINT_TO_POINTER(PANGO_WEIGHT_BOLD));
 }
 
-static void on_code_button_clicked(GtkButton *button, gpointer user_data) {
+static void on_inline_code_button_clicked(GtkButton *button, gpointer user_data) {
     (void)button;  // Unused parameter
     g_autoptr(GError) error = NULL;
-    
+
     if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
-        g_warning("Invalid text view for code action: %s", error->message);
+        g_warning("Invalid text view for inline code action: %s", error->message);
         return;
     }
 
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
     toggle_tag_on_selection(buffer, "code", "family", "monospace");
+}
+
+static void on_code_block_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
+    g_autoptr(GError) error = NULL;
+
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for code block action: %s", error->message);
+        return;
+    }
+
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
+
+    // Ensure we're at start of line
+    gtk_text_iter_set_line_offset(&cursor, 0);
+    gtk_text_buffer_insert(buffer, &cursor, "```\n\n```\n", -1);
+
+    // Move cursor back to the empty line between the code fences
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
+    gtk_text_iter_backward_chars(&cursor, 5);  // Move back to empty line
+    gtk_text_buffer_place_cursor(buffer, &cursor);
+}
+
+static void on_blockquote_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
+    g_autoptr(GError) error = NULL;
+
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for blockquote action: %s", error->message);
+        return;
+    }
+
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
+
+    // Ensure we're at start of line
+    gtk_text_iter_set_line_offset(&cursor, 0);
+    gtk_text_buffer_insert(buffer, &cursor, "> ", -1);
+}
+
+static void on_bullet_list_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
+    g_autoptr(GError) error = NULL;
+
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for bullet list action: %s", error->message);
+        return;
+    }
+
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
+
+    // Ensure we're at start of line
+    gtk_text_iter_set_line_offset(&cursor, 0);
+    gtk_text_buffer_insert(buffer, &cursor, "- ", -1);
+}
+
+static void on_numbered_list_button_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;  // Unused parameter
+    g_autoptr(GError) error = NULL;
+
+    if (!validate_text_view(GTK_TEXT_VIEW(user_data), &error)) {
+        g_warning("Invalid text view for numbered list action: %s", error->message);
+        return;
+    }
+
+    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
+
+    // Ensure we're at start of line
+    gtk_text_iter_set_line_offset(&cursor, 0);
+    gtk_text_buffer_insert(buffer, &cursor, "1. ", -1);
 }
 
 static void on_hr_button_clicked(GtkButton *button, gpointer user_data) {
@@ -483,7 +580,11 @@ static void on_source_view_button_clicked(GtkButton *button, gpointer user_data)
             // Disable formatting buttons
             if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
             if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
-            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), FALSE);
+            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), FALSE);
+            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), FALSE);
+            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), FALSE);
+            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), FALSE);
+            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), FALSE);
             if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
             if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
 
@@ -503,7 +604,11 @@ static void on_source_view_button_clicked(GtkButton *button, gpointer user_data)
             // Re-enable formatting buttons
             if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
             if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
-            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), TRUE);
+            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), TRUE);
+            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), TRUE);
+            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), TRUE);
+            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), TRUE);
+            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), TRUE);
             if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
             if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
 
@@ -518,15 +623,27 @@ static void on_source_view_button_clicked(GtkButton *button, gpointer user_data)
 static void toolbar_connect_signals(ToolbarComponent *t, GtkTextView *text_view) {
     g_return_if_fail(t != NULL);
     g_return_if_fail(GTK_IS_TEXT_VIEW(text_view));
-    
+
     if (t->italic_button) {
         g_signal_connect(t->italic_button, "clicked", G_CALLBACK(on_italic_button_clicked), text_view);
     }
     if (t->bold_button) {
         g_signal_connect(t->bold_button, "clicked", G_CALLBACK(on_bold_button_clicked), text_view);
     }
-    if (t->code_button) {
-        g_signal_connect(t->code_button, "clicked", G_CALLBACK(on_code_button_clicked), text_view);
+    if (t->inline_code_button) {
+        g_signal_connect(t->inline_code_button, "clicked", G_CALLBACK(on_inline_code_button_clicked), text_view);
+    }
+    if (t->code_block_button) {
+        g_signal_connect(t->code_block_button, "clicked", G_CALLBACK(on_code_block_button_clicked), text_view);
+    }
+    if (t->blockquote_button) {
+        g_signal_connect(t->blockquote_button, "clicked", G_CALLBACK(on_blockquote_button_clicked), text_view);
+    }
+    if (t->bullet_list_button) {
+        g_signal_connect(t->bullet_list_button, "clicked", G_CALLBACK(on_bullet_list_button_clicked), text_view);
+    }
+    if (t->numbered_list_button) {
+        g_signal_connect(t->numbered_list_button, "clicked", G_CALLBACK(on_numbered_list_button_clicked), text_view);
     }
     if (t->hr_button) {
         g_signal_connect(t->hr_button, "clicked", G_CALLBACK(on_hr_button_clicked), text_view);
@@ -633,16 +750,20 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
         button_order = g_settings_get_strv(toolbar_state.settings, "toolbar-button-order");
     } else {
         // Use default order
-        button_order = g_strsplit("bold,italic,code,heading,hr,source", ",", -1);
+        button_order = g_strsplit("bold,italic,inline-code,code-block,blockquote,bullet-list,numbered-list,heading,hr,source", ",", -1);
     }
 
     // Create buttons based on current style
     toolbar_state.bold_button = GTK_BUTTON(create_button_for_style(&button_info[0], toolbar_state.current_style));
     toolbar_state.italic_button = GTK_BUTTON(create_button_for_style(&button_info[1], toolbar_state.current_style));
-    toolbar_state.code_button = GTK_BUTTON(create_button_for_style(&button_info[2], toolbar_state.current_style));
-    toolbar_state.heading_button = GTK_MENU_BUTTON(create_menu_button_for_style(&button_info[3], toolbar_state.current_style));
-    toolbar_state.hr_button = GTK_BUTTON(create_button_for_style(&button_info[4], toolbar_state.current_style));
-    toolbar_state.source_view_button = GTK_BUTTON(create_button_for_style(&button_info[5], toolbar_state.current_style));
+    toolbar_state.inline_code_button = GTK_BUTTON(create_button_for_style(&button_info[2], toolbar_state.current_style));
+    toolbar_state.code_block_button = GTK_BUTTON(create_button_for_style(&button_info[3], toolbar_state.current_style));
+    toolbar_state.blockquote_button = GTK_BUTTON(create_button_for_style(&button_info[4], toolbar_state.current_style));
+    toolbar_state.bullet_list_button = GTK_BUTTON(create_button_for_style(&button_info[5], toolbar_state.current_style));
+    toolbar_state.numbered_list_button = GTK_BUTTON(create_button_for_style(&button_info[6], toolbar_state.current_style));
+    toolbar_state.heading_button = GTK_MENU_BUTTON(create_menu_button_for_style(&button_info[7], toolbar_state.current_style));
+    toolbar_state.hr_button = GTK_BUTTON(create_button_for_style(&button_info[8], toolbar_state.current_style));
+    toolbar_state.source_view_button = GTK_BUTTON(create_button_for_style(&button_info[9], toolbar_state.current_style));
 
     // Adjust button sizing based on style - let icon-only buttons use natural size like header buttons
     if (toolbar_state.current_style == TOOLBAR_STYLE_ICONS) {
@@ -652,7 +773,11 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
         // Text-only buttons need more width
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 50, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 60, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 50, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.inline_code_button), 80, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_block_button), 70, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.blockquote_button), 70, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bullet_list_button), 80, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.numbered_list_button), 100, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 80, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 40, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 50, 32);
@@ -660,7 +785,11 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
         // Both mode needs the most width
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 70, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 80, 32);
-        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 70, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.inline_code_button), 100, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_block_button), 90, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.blockquote_button), 90, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bullet_list_button), 100, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.numbered_list_button), 120, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 100, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 60, 32);
         gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 70, 32);
@@ -694,14 +823,25 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
             button = GTK_WIDGET(toolbar_state.bold_button);
         } else if (g_strcmp0(btn_id, "italic") == 0) {
             button = GTK_WIDGET(toolbar_state.italic_button);
-        } else if (g_strcmp0(btn_id, "code") == 0) {
-            button = GTK_WIDGET(toolbar_state.code_button);
+        } else if (g_strcmp0(btn_id, "inline-code") == 0) {
+            button = GTK_WIDGET(toolbar_state.inline_code_button);
+        } else if (g_strcmp0(btn_id, "code-block") == 0) {
+            button = GTK_WIDGET(toolbar_state.code_block_button);
+        } else if (g_strcmp0(btn_id, "blockquote") == 0) {
+            button = GTK_WIDGET(toolbar_state.blockquote_button);
+        } else if (g_strcmp0(btn_id, "bullet-list") == 0) {
+            button = GTK_WIDGET(toolbar_state.bullet_list_button);
+        } else if (g_strcmp0(btn_id, "numbered-list") == 0) {
+            button = GTK_WIDGET(toolbar_state.numbered_list_button);
         } else if (g_strcmp0(btn_id, "heading") == 0) {
             button = GTK_WIDGET(toolbar_state.heading_button);
         } else if (g_strcmp0(btn_id, "hr") == 0) {
             button = GTK_WIDGET(toolbar_state.hr_button);
         } else if (g_strcmp0(btn_id, "source") == 0) {
             button = GTK_WIDGET(toolbar_state.source_view_button);
+        } else if (g_strcmp0(btn_id, "code") == 0) {
+            // Legacy support for old "code" button - map to inline-code
+            button = GTK_WIDGET(toolbar_state.inline_code_button);
         }
 
         if (button) {
@@ -755,8 +895,20 @@ void toolbar_update_text_view(GtkWidget *new_text_view)
     if (toolbar_state.bold_button) {
         g_signal_handlers_disconnect_by_func(toolbar_state.bold_button, on_bold_button_clicked, toolbar_state.text_view);
     }
-    if (toolbar_state.code_button) {
-        g_signal_handlers_disconnect_by_func(toolbar_state.code_button, on_code_button_clicked, toolbar_state.text_view);
+    if (toolbar_state.inline_code_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.inline_code_button, on_inline_code_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.code_block_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.code_block_button, on_code_block_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.blockquote_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.blockquote_button, on_blockquote_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.bullet_list_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.bullet_list_button, on_bullet_list_button_clicked, toolbar_state.text_view);
+    }
+    if (toolbar_state.numbered_list_button) {
+        g_signal_handlers_disconnect_by_func(toolbar_state.numbered_list_button, on_numbered_list_button_clicked, toolbar_state.text_view);
     }
     if (toolbar_state.hr_button) {
         g_signal_handlers_disconnect_by_func(toolbar_state.hr_button, on_hr_button_clicked, toolbar_state.text_view);
@@ -793,7 +945,11 @@ void toolbar_update_text_view(GtkWidget *new_text_view)
                             // Disable formatting buttons
                             if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
                             if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
-                            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), FALSE);
+                            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), FALSE);
+                            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), FALSE);
+                            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), FALSE);
+                            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), FALSE);
+                            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), FALSE);
                             if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
                             if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
                         } else {
@@ -807,7 +963,11 @@ void toolbar_update_text_view(GtkWidget *new_text_view)
                             // Enable formatting buttons
                             if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
                             if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
-                            if (toolbar_state.code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_button), TRUE);
+                            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), TRUE);
+                            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), TRUE);
+                            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), TRUE);
+                            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), TRUE);
+                            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), TRUE);
                             if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
                             if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
                         }

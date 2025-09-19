@@ -175,51 +175,6 @@ static void on_adjustment_changed(GObject *adj, GParamSpec *pspec, gpointer user
  * PUBLIC API - Text view interaction functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-gboolean text_view_on_key_pressed(GtkEventControllerKey *controller,
-                                  guint keyval,
-                                  guint keycode,
-                                  GdkModifierType state,
-                                  gpointer user_data)
-{
-    (void)controller;
-    (void)keycode;
-    GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
-
-    if (state & GDK_CONTROL_MASK) {
-        /* Detect Ctrl+C */
-        if (keyval == GDK_KEY_c || keyval == GDK_KEY_C) {
-            text_view_copy_selected_as_markdown(text_view);
-            return TRUE;
-        }
-        /* Detect Ctrl+Plus/Equal (zoom in) */
-        if (keyval == GDK_KEY_plus || keyval == GDK_KEY_equal || keyval == GDK_KEY_KP_Add) {
-            text_view_zoom(text_view, TRUE);
-            return TRUE;
-        }
-        /* Detect Ctrl+Minus (zoom out) */
-        if (keyval == GDK_KEY_minus || keyval == GDK_KEY_KP_Subtract) {
-            text_view_zoom(text_view, FALSE);
-            return TRUE;
-        }
-        /* Detect Ctrl+0 (reset zoom) */
-        if (keyval == GDK_KEY_0 || keyval == GDK_KEY_KP_0) {
-            GtkCssProvider *provider = gtk_css_provider_new();
-            gtk_css_provider_load_from_string(provider, "textview { font-size: 100%; }");
-            gtk_style_context_add_provider_for_display(
-                gdk_display_get_default(),
-                GTK_STYLE_PROVIDER(provider),
-                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-            g_object_unref(provider);
-
-            /* Reset stored zoom level */
-            gdouble *zoom_ptr = g_new(gdouble, 1);
-            *zoom_ptr = 1.0;
-            g_object_set_data_full(G_OBJECT(text_view), "zoom-level", zoom_ptr, g_free);
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
 
 gboolean text_view_on_scroll_event(GtkEventControllerScroll *controller, gdouble dx, gdouble dy,
                                    gpointer user_data)

@@ -18,7 +18,6 @@
 #include <gtktext/core/signal_manager.h>
 #include <gtktext/core/window_size_manager.h>
 #include <gtktext/document/document_manager.h>
-#include <gtktext/ui/dialogs.h>
 #include <gtktext/editor/buffer_manager.h>
 #include <gtktext/ui/tab_manager.h>
 
@@ -33,6 +32,13 @@
 gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer user_data)
 {
     (void)user_data; /* Parameter required for signal signature but unused */
+
+    /* Validate window object before proceeding */
+    if (!window || !GTK_IS_WINDOW(window)) {
+        g_warning("window_lifecycle_on_window_close_request: Invalid window object");
+        return FALSE; /* Allow close if window is invalid */
+    }
+
     /* Check if we're closing without dialog (to prevent recursion) */
     gpointer closing_flag = g_object_get_data(G_OBJECT(window), "closing-without-dialog");
     if (closing_flag) {
@@ -44,11 +50,15 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
 
     /* Get the tab manager from the application */
     GtkApplication *app = gtk_window_get_application(window);
-    TabManager *tab_manager = gtktext_get_tab_manager(app);
+    if (!app || !GTK_IS_APPLICATION(app)) {
+        g_warning("window_lifecycle_on_window_close_request: Invalid application object");
+        return FALSE; /* Allow close if app is invalid */
+    }
 
+    TabManager *tab_manager = gtktext_get_tab_manager(app);
     if (!tab_manager) {
         g_warning("window_lifecycle_on_window_close_request: Failed to get tab manager");
-        return FALSE;
+        return FALSE; /* Allow close if no tab manager */
     }
 
     /* Check if ANY tab has unsaved changes */
@@ -57,14 +67,11 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
 
         /* Get first tab with unsaved changes for the dialog */
         AdwTabPage *page = tab_manager_get_first_unsaved_tab(tab_manager);
-        if (page) {
-            GtkWidget *text_view = tab_manager_get_text_view(tab_manager, page);
-            if (text_view) {
-                GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-                if (buffer) {
-                    dialogs_show_unsaved_changes_dialog(window, buffer);
-                    return TRUE; /* Prevent close until user decides */
-                }
+        if (page && ADW_IS_TAB_PAGE(page)) {
+            TabDocument *tab_doc = tab_manager_get_tab_document(tab_manager, page);
+            if (tab_doc) {
+                tab_manager_show_window_close_dialog(window, tab_doc);
+                return TRUE; /* Prevent close until user decides */
             }
         }
         return TRUE; /* Prevent close as fallback */
@@ -73,9 +80,11 @@ gboolean window_lifecycle_on_window_close_request(GtkWindow *window, gpointer us
     g_debug("window_lifecycle_on_window_close_request: no unsaved changes, proceeding with close");
 
     /* Save window state before closing */
-    GSettings *settings = g_object_get_data(G_OBJECT(window), "settings");
-    if (settings) {
-        window_size_manager_save_state(window, settings);
+    if (GTK_IS_WINDOW(window) && G_IS_OBJECT(window)) {
+        GSettings *settings = g_object_get_data(G_OBJECT(window), "settings");
+        if (settings && G_IS_SETTINGS(settings)) {
+            window_size_manager_save_state(window, settings);
+        }
     }
 
     /* Clean up signal connections for all tabs */

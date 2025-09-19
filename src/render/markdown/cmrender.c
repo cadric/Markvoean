@@ -1204,8 +1204,11 @@ static void cm_render_node_content_recursive(cmark_node *node, GtkTextBuffer *bu
                     // Create a child anchor in the text buffer
                     GtkTextChildAnchor *anchor = gtk_text_buffer_create_child_anchor(buffer, iter);
                     
-                    // Add the widget to the text view at the anchor
-                    gtk_text_view_add_child_at_anchor(g_image_fetch_context->text_view, image_widget, anchor);
+                    // Add the widget to the text view at the anchor (only if text view is ready)
+                    if (gtk_widget_get_mapped(GTK_WIDGET(g_image_fetch_context->text_view)) &&
+                        gtk_widget_get_width(GTK_WIDGET(g_image_fetch_context->text_view)) > 1) {
+                        gtk_text_view_add_child_at_anchor(g_image_fetch_context->text_view, image_widget, anchor);
+                    }
                     
                     g_debug("[image] Created image widget for URL: %s, alt: %s", url, alt_text->str);
                 } else {
@@ -1429,7 +1432,12 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
             if (anchor) {
                 GtkWidget *hr_widget = g_object_get_data(G_OBJECT(anchor), "hr-widget");
                 if (hr_widget && GTKTEXT_IS_HR_WIDGET(hr_widget)) {
-                    gtk_text_view_add_child_at_anchor(text_view, hr_widget, anchor);
+                    /* Only add widget if text view is properly allocated to prevent GTK warnings */
+                    if (gtk_widget_get_mapped(GTK_WIDGET(text_view)) &&
+                        gtk_widget_get_width(GTK_WIDGET(text_view)) > 1) {
+                        gtk_text_view_add_child_at_anchor(text_view, hr_widget, anchor);
+                    }
+                    /* If text view isn't ready, widget will be added during next reparse */
 
                     // Update widget color to match current theme
                     GdkRGBA hr_color;

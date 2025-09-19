@@ -141,7 +141,7 @@ gboolean event_handlers_on_key_pressed(GtkEventControllerKey *controller, guint 
 
     if (state & GDK_CONTROL_MASK) {
         /* Detect Ctrl+C */
-        if (keyval == GDK_KEY_c) {
+        if (keyval == GDK_KEY_c || keyval == GDK_KEY_C) {
             g_debug("Ctrl+C detected");
             text_view_copy_selected_as_markdown(text_view);
             return TRUE;

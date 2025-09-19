@@ -47,6 +47,9 @@ GtkWidget   *tab_manager_get_text_view(TabManager *tm, AdwTabPage *page);
 void         tab_manager_update_tab_title(TabManager *tm, AdwTabPage *page);
 void         tab_manager_mark_tab_dirty(TabManager *tm, AdwTabPage *page, gboolean dirty);
 
+/* Window close dialog */
+void         tab_manager_show_window_close_dialog(GtkWindow *window, TabDocument *tab_doc);
+
 /* Navigation */
 void         tab_manager_select_next_tab(TabManager *tm);
 void         tab_manager_select_previous_tab(TabManager *tm);

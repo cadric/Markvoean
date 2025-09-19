@@ -191,7 +191,11 @@ static void embed_foreach_tag(GtkTextTag *tag, gpointer user_data)
         if (child) {
             /* Create text child anchor and insert widget */
             GtkTextChildAnchor *anchor = gtk_text_buffer_create_child_anchor(c->buffer, &start);
-            gtk_text_view_add_child_at_anchor(c->view, child, anchor);
+            /* Only add widget if text view is properly allocated to prevent GTK warnings */
+            if (gtk_widget_get_mapped(GTK_WIDGET(c->view)) &&
+                gtk_widget_get_width(GTK_WIDGET(c->view)) > 1) {
+                gtk_text_view_add_child_at_anchor(c->view, child, anchor);
+            }
 
             /* Apply hidden tag to the alt text to make it transparent */
             if (text && *text) {
