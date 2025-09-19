@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: File action callbacks (open, save, save-as)
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.4.2] - 2025-09-19 - ui/actions/file_actions.c
-   Changed: Added shared helper function to consolidate duplicate dialog handlers
+   [1.4.3] - 2025-09-19 - ui/actions/file_actions.c
+   Changed: Unified dialog handlers and migrated save-as to async (GTK4-friendly)
 */
 
 #ifdef HAVE_CONFIG_H
@@ -30,6 +30,20 @@
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HELPERS - Utility functions for file operations
  * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Async save completion callback for tab documents */
+static void on_tab_document_save_as_async_done(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+    (void)user_data;
+    TabDocument *td = (TabDocument *)source;
+    GError *err = NULL;
+    if (!tab_document_save_as_finish(td, result, &err)) {
+        g_warning("Failed to save file: %s", err ? err->message : "Unknown error");
+        g_clear_error(&err);
+    } else {
+        g_message("File saved successfully");
+    }
+}
 
 /* Helper function to robustly validate if a directory exists and is accessible */
 static gboolean file_action_is_valid_directory(const char *path)
@@ -188,8 +202,8 @@ gboolean file_action_handle_open_dialog_result(GFile *file, GtkApplication *app,
             return FALSE;
         }
 
-        /* Use the new function to avoid double file reading */
-        if (!document_manager_open_file_with_content(dm, path, contents, error)) {
+        /* Adopt current buffer & file path to avoid double file reading */
+        if (!document_manager_adopt_current_buffer(dm, path, error)) {
             return FALSE;
         }
     }
@@ -307,7 +321,7 @@ void file_action_on_save_as_dialog_finish(GObject *source_object, GAsyncResult *
     g_autofree char *path = g_file_get_path(file);
 
     /* Use save_as to save to the new location */
-    document_manager_save_as(dm, path, NULL, app);  /* TODO: Add proper callback */
+    document_manager_save_as(dm, path, NULL, app);
 
     g_message("Document save-as initiated for: %s", path);
 }
@@ -358,14 +372,10 @@ void file_action_on_save_as_dialog_finish_tab(GObject *source_object, GAsyncResu
         return;
     }
 
-    /* Save the document to the selected path */
-    GError *save_error = NULL;
-    if (!tab_document_save_as(active_tab, path, &save_error)) {
-        g_warning("Failed to save file: %s", save_error ? save_error->message : "Unknown error");
-        g_clear_error(&save_error);
-    } else {
-        g_message("File saved as: %s", path);
-    }
+    /* Save the document to the selected path (async) */
+    tab_document_save_as_async(active_tab, path, NULL,
+                               on_tab_document_save_as_async_done,
+                               NULL);
 
     g_free(context);
 }

@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Document lifecycle, autosave, and recovery management
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.4.2] - 2025-09-19 - document_manager.c
-   Changed: Added document_manager_open_file_with_content to avoid double file reading
+   [1.4.3] - 2025-09-19 - document_manager.c
+   Changed: Added document_manager_adopt_current_buffer (with deprecated shim) to avoid double file reading
 */
 
 #ifdef HAVE_CONFIG_H
@@ -1170,13 +1170,12 @@ gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
     return TRUE;
 }
 
-/* Open file with pre-loaded content - avoids double file reading */
-gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
-                                                const gchar *content, GError **error)
+/* Adopt current buffer for a given file path - avoids double file reading */
+gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar *file_path,
+                                               GError **error)
 {
     g_return_val_if_fail(dm != NULL, FALSE);
     g_return_val_if_fail(file_path != NULL, FALSE);
-    g_return_val_if_fail(content != NULL, FALSE);
 
     /* Check if file exists and is readable */
     if (!g_file_test(file_path, G_FILE_TEST_EXISTS)) {
@@ -1204,8 +1203,16 @@ gboolean document_manager_open_file_with_content(DocumentManager *dm, const gcha
     update_original_content(dm);
     set_document_state(dm, DOC_STATE_CLEAN);
 
-    g_debug("File opened with existing content: %s", file_path);
+    g_debug("Adopted current buffer for file: %s", file_path);
     return TRUE;
+}
+
+/* Deprecated shim maintained for compatibility */
+gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
+                                                const gchar *content, GError **error)
+{
+    (void)content; /* Unused – content already present in buffer */
+    return document_manager_adopt_current_buffer(dm, file_path, error);
 }
 
 gboolean document_manager_save_draft(DocumentManager *dm, GError **error)

@@ -675,3 +675,14 @@ Technical Details
 - Syntax highlighting for code blocks
 - Auto-save functionality
 - Zoom controls and keyboard shortcuts
+## [1.4.3] - 2025-09-19
+
+### Changed
+- Introduced non-blocking tab save flow using async API in TabDocument
+- Replaced remaining double-read on tab initialization with buffer adoption
+
+### Technical Details
+- Added `document_manager_adopt_current_buffer()` and deprecated shim `document_manager_open_file_with_content()`
+- Updated tab initialization and file-open paths to use buffer adoption
+- Implemented `tab_document_save_as_async()` with GTask + atomic write; `tab_document_save_as_finish()` now updates DocumentManager state and tab metadata
+- Updated save handlers in tab actions and tab manager close workflow to async pattern

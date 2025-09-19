@@ -55,6 +55,12 @@ void document_manager_free(DocumentManager *dm);
 /* Document operations */
 gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
                                    GError **error);
+/* Adopt current buffer for a given file path without re-reading from disk */
+gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar *file_path,
+                                               GError **error);
+
+/* Deprecated shim: kept for compatibility; use document_manager_adopt_current_buffer */
+G_GNUC_DEPRECATED_FOR(document_manager_adopt_current_buffer)
 gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
                                                 const gchar *content, GError **error);
 gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog, 

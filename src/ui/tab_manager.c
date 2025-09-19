@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Multi-document tab management for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.2.0] - 2025-09-18 - ui/tab_manager.c
-   MINOR: Implemented proper GTK4 context menu with tab management actions
+   [1.4.3] - 2025-09-19 - ui/tab_manager.c
+   Changed: Close workflow now uses async save for GTK4/libadwaita responsiveness
 */
 
 #ifdef HAVE_CONFIG_H
@@ -61,6 +61,29 @@ typedef struct {
     TabDocument *tab_doc;
 } SaveAsCloseContext;
 
+/* Async close-save context and completion */
+typedef struct {
+    AdwTabView *tab_view;
+    AdwTabPage *page;
+    TabDocument *tab_doc;
+} CloseSaveCtx;
+
+static void on_tab_document_save_as_async_done_close(GObject *src, GAsyncResult *ares, gpointer u)
+{
+    CloseSaveCtx *cs = (CloseSaveCtx *)u;
+    GError *err = NULL;
+    gboolean ok = tab_document_save_as_finish((TabDocument *)src, ares, &err);
+    if (!ok) {
+        g_warning("Failed to save file during close: %s", err ? err->message : "Unknown error");
+        g_clear_error(&err);
+        safe_close_page_finish(cs->tab_view, cs->page, FALSE);
+    } else {
+        g_message("File saved as during close");
+        safe_close_page_finish(cs->tab_view, cs->page, TRUE);
+    }
+    g_free(cs);
+}
+
 /* Save-as dialog completion callback for close workflow */
 static void on_save_as_close_dialog_finish(GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
@@ -89,18 +112,15 @@ static void on_save_as_close_dialog_finish(GObject *source_object, GAsyncResult 
     g_autofree char *path = g_file_get_path(file);
     g_debug("Save-as for close: file selected: %s", path ? path : "(null)");
 
-    /* Save the document to the selected path */
-    GError *save_error = NULL;
-    if (!tab_document_save_as(context->tab_doc, path, &save_error)) {
-        g_warning("Failed to save file during close: %s", save_error ? save_error->message : "Unknown error");
-        g_clear_error(&save_error);
-        /* Cancel the close operation */
-        safe_close_page_finish(context->tab_view, context->page, FALSE);
-    } else {
-        g_message("File saved as during close: %s", path);
-        /* Save successful, allow close */
-        safe_close_page_finish(context->tab_view, context->page, TRUE);
-    }
+    /* Save the document to the selected path asynchronously */
+    CloseSaveCtx *cctx = g_new0(CloseSaveCtx, 1);
+    cctx->tab_view = context->tab_view;
+    cctx->page = context->page;
+    cctx->tab_doc = context->tab_doc;
+
+    tab_document_save_as_async(context->tab_doc, path, NULL,
+                               on_tab_document_save_as_async_done_close,
+                               cctx);
 
     g_free(context);
 }

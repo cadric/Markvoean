@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Per-tab document container for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.4.2] - 2025-09-19 - ui/tab_document.c
-   Changed: Updated to use document_manager_open_file_with_content
+   [1.4.3] - 2025-09-19 - ui/tab_document.c
+   Changed: Implemented async save API and adopted DM buffer path to avoid double reads
 */
 
 #ifdef HAVE_CONFIG_H
@@ -314,7 +314,8 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
             g_debug("BLOCKED DocumentManager signals for file setup: %s", td->file_path);
 
             GError *error = NULL;
-            if (!document_manager_open_file(td->doc_manager, td->file_path, &error)) {
+            /* Adopt existing buffer/content without re-reading from disk */
+            if (!document_manager_adopt_current_buffer(td->doc_manager, td->file_path, &error)) {
                 g_warning("Failed to tell DocumentManager about file path %s: %s",
                          td->file_path, error ? error->message : "Unknown error");
                 g_clear_error(&error);
@@ -601,9 +602,9 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
     g_autofree char *basename = g_path_get_basename(file_path);
     td->tab_title = g_steal_pointer(&basename);
 
-    /* Update DocumentManager with file path and content (avoid double read) */
+    /* Update DocumentManager with file path (avoid double read) */
     if (td->doc_manager) {
-        document_manager_open_file_with_content(td->doc_manager, file_path, contents, NULL);
+        document_manager_adopt_current_buffer(td->doc_manager, file_path, NULL);
     }
 
     /* Note: tab_document_set_modified(td, FALSE) will be called after deferred rendering completes */
@@ -623,7 +624,9 @@ gboolean tab_document_save(TabDocument *td, GError **error)
         return FALSE;
     }
 
-    return tab_document_save_as(td, td->file_path, error);
+    /* Start async save to avoid blocking UI */
+    tab_document_save_as_async(td, td->file_path, NULL, NULL, NULL);
+    return TRUE; /* indicates save started */
 }
 
 gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **error)
@@ -684,10 +687,44 @@ gboolean tab_document_save_as_sync(TabDocument *td, const char *file_path, GErro
     g_return_val_if_fail(td != NULL, FALSE);
     g_return_val_if_fail(file_path != NULL, FALSE);
 
-    /* TODO: Implement proper synchronous save that waits for DocumentManager async completion */
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
                "Synchronous save not yet implemented - DocumentManager uses async API");
     return FALSE;
+}
+
+/* Save task payload */
+typedef struct {
+    char *path;
+    char *content;
+} SaveTaskData;
+
+static void save_task_data_free(SaveTaskData *p)
+{
+    if (!p) return;
+    g_free(p->path);
+    g_free(p->content);
+    g_free(p);
+}
+
+static void save_as_task_thread(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
+{
+    (void)source_object;
+    SaveTaskData *data = (SaveTaskData *)task_data;
+
+    if (cancellable && g_cancellable_is_cancelled(cancellable)) {
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Save cancelled");
+        return;
+    }
+
+    gsize len = strlen(data->content);
+    GError *io_error = NULL;
+    if (!atomic_write_file(data->path, data->content, len, &io_error)) {
+        g_task_return_error(task, io_error);
+        return;
+    }
+
+    /* Success */
+    g_task_return_boolean(task, TRUE);
 }
 
 void tab_document_save_as_async(TabDocument *td,
@@ -699,10 +736,23 @@ void tab_document_save_as_async(TabDocument *td,
     g_return_if_fail(td != NULL);
     g_return_if_fail(file_path != NULL);
 
-    /* TODO: Implement proper async save that integrates with DocumentManager callbacks */
+    /* Capture current buffer content on main thread */
+    g_autofree char *content = cm_render_buffer_to_markdown(td->buffer);
+    if (!content) {
+        GTask *task = g_task_new(td, cancellable, callback, user_data);
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to retrieve buffer content");
+        g_object_unref(task);
+        return;
+    }
+
+    SaveTaskData *data = g_new0(SaveTaskData, 1);
+    data->path = g_strdup(file_path);
+    data->content = g_strdup(content);
+
     GTask *task = g_task_new(td, cancellable, callback, user_data);
-    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                           "Async save not yet implemented - needs DocumentManager integration");
+    g_task_set_task_data(task, data, (GDestroyNotify)save_task_data_free);
+
+    g_task_run_in_thread(task, save_as_task_thread);
     g_object_unref(task);
 }
 
@@ -711,7 +761,29 @@ gboolean tab_document_save_as_finish(TabDocument *td, GAsyncResult *result, GErr
     g_return_val_if_fail(td != NULL, FALSE);
     g_return_val_if_fail(G_IS_TASK(result), FALSE);
 
-    return g_task_propagate_boolean(G_TASK(result), error);
+    gboolean ok = g_task_propagate_boolean(G_TASK(result), error);
+    if (!ok) return FALSE;
+
+    /* On success, adopt current buffer for path and update TabDocument metadata */
+    SaveTaskData *data = (SaveTaskData *)g_task_get_task_data(G_TASK(result));
+    if (data && td->doc_manager) {
+        document_manager_adopt_current_buffer(td->doc_manager, data->path, NULL);
+    }
+
+    /* Update TabDocument metadata */
+    if (data) {
+        g_free(td->file_path);
+        td->file_path = g_strdup(data->path);
+
+        g_free(td->tab_title);
+        g_autofree char *basename = g_path_get_basename(td->file_path);
+        td->tab_title = g_steal_pointer(&basename);
+    }
+
+    /* Mark as clean via standard API (also triggers callbacks) */
+    tab_document_set_modified(td, FALSE);
+
+    return TRUE;
 }
 
 const char *tab_document_get_display_title(TabDocument *td)

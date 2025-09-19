@@ -2,7 +2,7 @@
 # Changed: Code consolidation - eliminated duplicate file loading logic and unified dialog handlers
 
 project('gtktext', 'c',
-  version: '1.4.2',
+  version: '1.4.3',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',
