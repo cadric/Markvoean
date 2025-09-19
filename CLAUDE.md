@@ -14,6 +14,7 @@
 3. **Safety**: explicit ownership, predictable lifetimes, hardened builds.
 4. **Modern only**: GTK 4, Wayland focus, Flatpak‑friendly.
 5. **Accessibility**: keyboard, AT‑SPI, contrast, i18n.
+6. **use context7**: Up-to-date documentation.
 ---
 ## ⚠️ Prohibited Practices
 

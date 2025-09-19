@@ -27,6 +27,19 @@ typedef enum {
     VIEW_MODE_SOURCE
 } ViewMode;
 
+typedef enum {
+    TOOLBAR_STYLE_TEXT,
+    TOOLBAR_STYLE_ICONS,
+    TOOLBAR_STYLE_BOTH
+} ToolbarStyle;
+
+typedef struct {
+    const char *id;
+    const char *icon_name;
+    const char *label;
+    const char *tooltip;
+} ButtonInfo;
+
 typedef struct {
     GtkTextView *text_view;
     GtkTextBuffer *buffer;
@@ -42,10 +55,22 @@ typedef struct {
     GtkTextBuffer *source_buffer;   // Separate buffer for source mode
     GtkWidget *scrolled_window;     // Store the scrolled window container
     GtkTextView *original_text_view; // Store original text view reference
+    GSettings *settings;             // Settings for toolbar configuration
+    ToolbarStyle current_style;      // Current toolbar display style
 } ToolbarComponent;
 
 /* ========== STATE ========== */
 static ToolbarComponent toolbar_state = { 0 };
+
+/* Button definitions with icons and labels */
+static const ButtonInfo button_info[] = {
+    { "bold", "format-text-bold-symbolic", "Fed", "Bold text (Ctrl+B)" },
+    { "italic", "format-text-italic-symbolic", "Kursiv", "Italic text (Ctrl+I)" },
+    { "code", "text-x-generic-symbolic", "Kode", "Insert code (Ctrl+`)" },
+    { "heading", "font-select-symbolic", "Overskrifter", "Select heading level" },
+    { "hr", "insert-object-symbolic", "HR", "Insert horizontal rule" },
+    { "source", "format-text-plaintext-symbolic", "Kilde", "Toggle source view" }
+};
 
 /* ========== HELPERS ========== */
 static void toolbar_reset(ToolbarComponent *t) {
@@ -68,7 +93,11 @@ static void toolbar_reset(ToolbarComponent *t) {
     if (t->source_buffer && G_IS_OBJECT(t->source_buffer)) {
         g_object_unref(t->source_buffer);
     }
-    
+
+    if (t->settings && G_IS_OBJECT(t->settings)) {
+        g_object_unref(t->settings);
+    }
+
     t->text_view = NULL;
     t->buffer = NULL;
     t->header_bar = NULL;
@@ -83,17 +112,109 @@ static void toolbar_reset(ToolbarComponent *t) {
     t->source_buffer = NULL;
     t->scrolled_window = NULL;
     t->original_text_view = NULL;
+    t->settings = NULL;
+    t->current_style = TOOLBAR_STYLE_ICONS;
 }
 
 static gboolean validate_text_view(GtkTextView *text_view, GError **error) {
     g_return_val_if_fail(error == NULL || *error == NULL, FALSE);
-    
+
     if (!GTK_IS_TEXT_VIEW(text_view)) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
                    "Invalid text view provided");
         return FALSE;
     }
     return TRUE;
+}
+
+static ToolbarStyle get_toolbar_style_from_settings(GSettings *settings) {
+    g_autofree gchar *style_str = g_settings_get_string(settings, "toolbar-style");
+
+    if (g_strcmp0(style_str, "text") == 0) {
+        return TOOLBAR_STYLE_TEXT;
+    } else if (g_strcmp0(style_str, "both") == 0) {
+        return TOOLBAR_STYLE_BOTH;
+    } else {
+        return TOOLBAR_STYLE_ICONS; // Default to icons
+    }
+}
+
+static GtkWidget* create_button_for_style(const ButtonInfo *info, ToolbarStyle style) {
+    GtkWidget *button = gtk_button_new();
+
+    switch (style) {
+        case TOOLBAR_STYLE_TEXT:
+            gtk_button_set_label(GTK_BUTTON(button), info->label);
+            break;
+
+        case TOOLBAR_STYLE_ICONS: {
+            GtkWidget *icon = gtk_image_new_from_icon_name(info->icon_name);
+            gtk_button_set_child(GTK_BUTTON(button), icon);
+            break;
+        }
+
+        case TOOLBAR_STYLE_BOTH: {
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+            GtkWidget *icon = gtk_image_new_from_icon_name(info->icon_name);
+            GtkWidget *label = gtk_label_new(info->label);
+            gtk_box_append(GTK_BOX(box), icon);
+            gtk_box_append(GTK_BOX(box), label);
+            gtk_button_set_child(GTK_BUTTON(button), box);
+            break;
+        }
+    }
+
+    // Always set tooltip for accessibility (translate at runtime)
+    gtk_widget_set_tooltip_text(button, _(info->tooltip));
+
+    // Set accessible properties (translate at runtime)
+    gtk_accessible_update_property(GTK_ACCESSIBLE(button),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, _(info->tooltip),
+                                   -1);
+
+    // Add style classes for proper theming
+    gtk_widget_add_css_class(button, "flat");
+
+    return button;
+}
+
+static GtkWidget* create_menu_button_for_style(const ButtonInfo *info, ToolbarStyle style) {
+    GtkWidget *button = gtk_menu_button_new();
+
+    switch (style) {
+        case TOOLBAR_STYLE_TEXT:
+            gtk_menu_button_set_label(GTK_MENU_BUTTON(button), info->label);
+            break;
+
+        case TOOLBAR_STYLE_ICONS: {
+            GtkWidget *icon = gtk_image_new_from_icon_name(info->icon_name);
+            gtk_menu_button_set_child(GTK_MENU_BUTTON(button), icon);
+            break;
+        }
+
+        case TOOLBAR_STYLE_BOTH: {
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+            GtkWidget *icon = gtk_image_new_from_icon_name(info->icon_name);
+            GtkWidget *label = gtk_label_new(info->label);
+            gtk_box_append(GTK_BOX(box), icon);
+            gtk_box_append(GTK_BOX(box), label);
+            gtk_menu_button_set_child(GTK_MENU_BUTTON(button), box);
+            break;
+        }
+    }
+
+    // Always set tooltip (translate at runtime)
+    gtk_widget_set_tooltip_text(button, _(info->tooltip));
+
+    // Set accessible properties (translate at runtime)
+    gtk_accessible_update_property(GTK_ACCESSIBLE(button),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, _(info->tooltip),
+                                   -1);
+
+    // Add style class
+    gtk_widget_add_css_class(button, "flat");
+
+    return button;
 }
 
 static GtkTextTag* ensure_tag_exists(GtkTextBuffer *buffer, const char *tag_name, 
@@ -439,6 +560,23 @@ static void setup_heading_menu(GtkWidget *heading_button, GtkWidget *text_view) 
     gtk_popover_set_child(GTK_POPOVER(popover), box);
 }
 
+static void on_toolbar_settings_changed(GSettings *settings, gchar *key, gpointer user_data) {
+    (void)settings; // Unused but required by signal signature
+    (void)user_data; // We'll use the global state directly
+
+    if (g_strcmp0(key, "toolbar-style") == 0 ||
+        g_strcmp0(key, "toolbar-customization") == 0 ||
+        g_strcmp0(key, "toolbar-button-order") == 0) {
+
+        // Store current text view before rebuilding
+        GtkTextView *current_view = toolbar_state.text_view;
+        if (current_view) {
+            // Recreate toolbar
+            create_toolbar(GTK_WIDGET(current_view));
+        }
+    }
+}
+
 /* ========== LIFECYCLE ========== */
 GtkWidget* create_toolbar(GtkWidget *text_view) {
     g_autoptr(GError) error = NULL;
@@ -477,81 +615,113 @@ GtkWidget* create_toolbar(GtkWidget *text_view) {
         child = next;
     }
     
-    // Create buttons with explicit sizing
-    toolbar_state.italic_button = GTK_BUTTON(gtk_button_new_with_label("Kursiv"));
-    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 60, 32);
+    // Get toolbar style from settings (take a reference)
+    if (toolbar_state.settings) {
+        g_object_unref(toolbar_state.settings);
+    }
+    toolbar_state.settings = g_settings_new("org.gtk.gtktext");
+    toolbar_state.current_style = get_toolbar_style_from_settings(toolbar_state.settings);
 
-    toolbar_state.bold_button = GTK_BUTTON(gtk_button_new_with_label("Fed"));
-    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 50, 32);
+    // Get button order if customization is enabled
+    gboolean custom_order = g_settings_get_boolean(toolbar_state.settings, "toolbar-customization");
+    g_auto(GStrv) button_order = NULL;
+    if (custom_order) {
+        button_order = g_settings_get_strv(toolbar_state.settings, "toolbar-button-order");
+    } else {
+        // Use default order
+        button_order = g_strsplit("bold,italic,code,heading,hr,source", ",", -1);
+    }
 
-    toolbar_state.code_button = GTK_BUTTON(gtk_button_new_with_label("Kode"));
-    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 50, 32);
+    // Create buttons based on current style
+    toolbar_state.bold_button = GTK_BUTTON(create_button_for_style(&button_info[0], toolbar_state.current_style));
+    toolbar_state.italic_button = GTK_BUTTON(create_button_for_style(&button_info[1], toolbar_state.current_style));
+    toolbar_state.code_button = GTK_BUTTON(create_button_for_style(&button_info[2], toolbar_state.current_style));
+    toolbar_state.heading_button = GTK_MENU_BUTTON(create_menu_button_for_style(&button_info[3], toolbar_state.current_style));
+    toolbar_state.hr_button = GTK_BUTTON(create_button_for_style(&button_info[4], toolbar_state.current_style));
+    toolbar_state.source_view_button = GTK_BUTTON(create_button_for_style(&button_info[5], toolbar_state.current_style));
 
-    toolbar_state.hr_button = GTK_BUTTON(gtk_button_new_with_label("HR"));
-    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 40, 32);
-
-    toolbar_state.heading_button = GTK_MENU_BUTTON(gtk_menu_button_new());
-    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 80, 32);
-
-    toolbar_state.source_view_button = GTK_BUTTON(gtk_button_new());
-    gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 40, 32);
-
+    // Adjust button sizing based on style
+    if (toolbar_state.current_style == TOOLBAR_STYLE_ICONS) {
+        // Icon-only buttons are square
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 32, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 32, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 32, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 32, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 32, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 32, 32);
+    } else if (toolbar_state.current_style == TOOLBAR_STYLE_TEXT) {
+        // Text-only buttons need more width
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 50, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 60, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 50, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 80, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 40, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 50, 32);
+    } else {
+        // Both mode needs the most width
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.bold_button), 70, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.italic_button), 80, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.code_button), 70, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.heading_button), 100, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.hr_button), 60, 32);
+        gtk_widget_set_size_request(GTK_WIDGET(toolbar_state.source_view_button), 70, 32);
+    }
     
-    // Create icon for source view button
-    GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
-    gtk_button_set_child(toolbar_state.source_view_button, source_icon);
-    
-    // Set accessible name for screen readers
-    gtk_accessible_update_property(GTK_ACCESSIBLE(toolbar_state.source_view_button),
-                                   GTK_ACCESSIBLE_PROPERTY_LABEL, _("Source view toggle"),
-                                   -1);
-    
-    gtk_menu_button_set_label(GTK_MENU_BUTTON(toolbar_state.heading_button), "Overskrifter");
-    
-    // Set tooltips
-    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.italic_button), "Sæt tekst i kursiv");
-    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.bold_button), "Sæt tekst med fed skrift");
-    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.code_button), "Indsæt inline kode eller kodeblok");
-    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.hr_button), "Indsæt horisontal streg");
-    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.heading_button), "Vælg overskriftstype");
-    gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button), _("Switch to source view"));
-    
-    // Add buttons to container and make them visible
-    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.italic_button));
-    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.italic_button), TRUE);
+    // Add buttons to container in the specified order
+    for (int i = 0; button_order[i] != NULL; i++) {
+        GtkWidget *button = NULL;
+        const char *btn_id = button_order[i];
 
-    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.bold_button));
-    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.bold_button), TRUE);
+        // Add separator before heading button
+        if (g_strcmp0(btn_id, "heading") == 0) {
+            GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+            gtk_widget_set_margin_start(separator, 6);
+            gtk_widget_set_margin_end(separator, 6);
+            gtk_box_append(GTK_BOX(toolbar_container), separator);
+            gtk_widget_set_visible(separator, TRUE);
+        }
 
-    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.code_button));
-    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.code_button), TRUE);
+        // Add separator before source button
+        if (g_strcmp0(btn_id, "source") == 0) {
+            GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+            gtk_widget_set_margin_start(separator2, 6);
+            gtk_widget_set_margin_end(separator2, 6);
+            gtk_box_append(GTK_BOX(toolbar_container), separator2);
+            gtk_widget_set_visible(separator2, TRUE);
+        }
 
-    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.hr_button));
-    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.hr_button), TRUE);
-    
-    // Add separator
-    GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
-    gtk_widget_set_margin_start(separator, 6);
-    gtk_widget_set_margin_end(separator, 6);
-    gtk_box_append(GTK_BOX(toolbar_container), separator);
-    gtk_widget_set_visible(separator, TRUE);
+        // Get the appropriate button widget
+        if (g_strcmp0(btn_id, "bold") == 0) {
+            button = GTK_WIDGET(toolbar_state.bold_button);
+        } else if (g_strcmp0(btn_id, "italic") == 0) {
+            button = GTK_WIDGET(toolbar_state.italic_button);
+        } else if (g_strcmp0(btn_id, "code") == 0) {
+            button = GTK_WIDGET(toolbar_state.code_button);
+        } else if (g_strcmp0(btn_id, "heading") == 0) {
+            button = GTK_WIDGET(toolbar_state.heading_button);
+        } else if (g_strcmp0(btn_id, "hr") == 0) {
+            button = GTK_WIDGET(toolbar_state.hr_button);
+        } else if (g_strcmp0(btn_id, "source") == 0) {
+            button = GTK_WIDGET(toolbar_state.source_view_button);
+        }
 
-    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.heading_button));
-    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.heading_button), TRUE);
-
-    // Add another separator for view toggle
-    GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
-    gtk_widget_set_margin_start(separator2, 6);
-    gtk_widget_set_margin_end(separator2, 6);
-    gtk_box_append(GTK_BOX(toolbar_container), separator2);
-    gtk_widget_set_visible(separator2, TRUE);
-
-    gtk_box_append(GTK_BOX(toolbar_container), GTK_WIDGET(toolbar_state.source_view_button));
-    gtk_widget_set_visible(GTK_WIDGET(toolbar_state.source_view_button), TRUE);
+        if (button) {
+            gtk_box_append(GTK_BOX(toolbar_container), button);
+            gtk_widget_set_visible(button, TRUE);
+        }
+    }
     
     // Connect all signals
     toolbar_connect_signals(&toolbar_state, toolbar_state.text_view);
     setup_heading_menu(GTK_WIDGET(toolbar_state.heading_button), GTK_WIDGET(toolbar_state.text_view));
+
+    // Connect settings change signal
+    g_signal_connect(toolbar_state.settings, "changed::toolbar-style",
+                     G_CALLBACK(on_toolbar_settings_changed), NULL);
+    g_signal_connect(toolbar_state.settings, "changed::toolbar-customization",
+                     G_CALLBACK(on_toolbar_settings_changed), NULL);
+    g_signal_connect(toolbar_state.settings, "changed::toolbar-button-order",
+                     G_CALLBACK(on_toolbar_settings_changed), NULL);
 
     // Make sure toolbar is visible
     gtk_widget_set_visible(toolbar_container, TRUE);

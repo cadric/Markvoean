@@ -55,6 +55,36 @@
         next launch to maintain user's preferred window state.
       </description>
     </key>
+    <key name="toolbar-style" type="s">
+      <default>'icons'</default>
+      <choices>
+        <choice value='text'/>
+        <choice value='icons'/>
+        <choice value='both'/>
+      </choices>
+      <summary>Toolbar button display style</summary>
+      <description>
+        How toolbar buttons are displayed: 'text' shows text labels only,
+        'icons' shows icons only, 'both' shows both icons and text labels.
+        Icons mode uses GNOME Adwaita symbolic icons for consistency.
+      </description>
+    </key>
+    <key name="toolbar-button-order" type="as">
+      <default>['bold', 'italic', 'code', 'heading', 'hr', 'source']</default>
+      <summary>Toolbar button order</summary>
+      <description>
+        Order of buttons in the toolbar. Only applies when toolbar-customization
+        is enabled. Valid values: bold, italic, code, heading, hr, source.
+      </description>
+    </key>
+    <key name="toolbar-customization" type="b">
+      <default>false</default>
+      <summary>Enable toolbar customization</summary>
+      <description>
+        When enabled, allows reordering toolbar buttons through preferences.
+        When disabled, uses the default button order.
+      </description>
+    </key>
   </schema>
   <!-- Keep schema id and path in sync with application code and install path. -->
   <!-- Installed to: share/glib-2.0/schemas/org.gtk.gtktext.gschema.xml -->
