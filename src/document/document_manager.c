@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Document lifecycle, autosave, and recovery management
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.1] - 2025-09-16 - document_manager.c
-   MAJOR RELEASE: Complete DocumentManager implementation - all 6 phases integrated
+   [1.4.2] - 2025-09-19 - document_manager.c
+   Changed: Added document_manager_open_file_with_content to avoid double file reading
 */
 
 #ifdef HAVE_CONFIG_H
@@ -665,6 +665,31 @@ static gchar* load_external_content(DocumentManager *dm, GError **error)
     return content;
 }
 
+/* Load content from file path and replace buffer contents */
+static gboolean load_content_into_buffer(DocumentManager *dm, const char *file_path, GError **error)
+{
+    g_return_val_if_fail(dm != NULL, FALSE);
+    g_return_val_if_fail(file_path != NULL, FALSE);
+    g_return_val_if_fail(dm->buffer != NULL, FALSE);
+
+    /* Load file content */
+    g_autofree gchar *content = NULL;
+    if (!g_file_get_contents(file_path, &content, NULL, error)) {
+        return FALSE;
+    }
+
+    /* Clear current buffer and load new content */
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
+    gtk_text_buffer_delete(dm->buffer, &start, &end);
+    gtk_text_buffer_insert_at_cursor(dm->buffer, content, -1);
+
+    /* Apply theme colors to any existing tags after loading content */
+    theme_styles_update_theme_dependent_tags(dm->buffer);
+
+    return TRUE;
+}
+
 /* Update file metadata after resolving conflict */
 static void update_file_metadata(DocumentManager *dm)
 {
@@ -1117,20 +1142,10 @@ gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
         return FALSE;
     }
     
-    /* Load file content */
-    g_autofree gchar *content = NULL;
-    if (!g_file_get_contents(file_path, &content, NULL, error)) {
+    /* Load file content into buffer using consolidated function */
+    if (!load_content_into_buffer(dm, file_path, error)) {
         return FALSE;
     }
-    
-    /* Clear current buffer and load new content */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
-    gtk_text_buffer_delete(dm->buffer, &start, &end);
-    gtk_text_buffer_insert_at_cursor(dm->buffer, content, -1);
-
-    /* Apply theme colors to any existing tags after loading content */
-    theme_styles_update_theme_dependent_tags(dm->buffer);
 
     /* Update document state */
     g_free(dm->file_path);
@@ -1152,6 +1167,44 @@ gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
     set_document_state(dm, DOC_STATE_CLEAN);
     
     g_debug("File opened successfully: %s", file_path);
+    return TRUE;
+}
+
+/* Open file with pre-loaded content - avoids double file reading */
+gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
+                                                const gchar *content, GError **error)
+{
+    g_return_val_if_fail(dm != NULL, FALSE);
+    g_return_val_if_fail(file_path != NULL, FALSE);
+    g_return_val_if_fail(content != NULL, FALSE);
+
+    /* Check if file exists and is readable */
+    if (!g_file_test(file_path, G_FILE_TEST_EXISTS)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                   "File does not exist: %s", file_path);
+        return FALSE;
+    }
+
+    /* Don't re-read file, just update DocumentManager state */
+    g_free(dm->file_path);
+    dm->file_path = g_strdup(file_path);
+    dm->is_untitled = FALSE;
+
+    /* Clear any existing draft/recovery paths */
+    g_clear_pointer(&dm->draft_path, g_free);
+    g_clear_pointer(&dm->recovery_path, g_free);
+
+    /* Update file metadata */
+    update_file_metadata(dm);
+
+    /* Setup file monitoring */
+    setup_file_monitor(dm);
+
+    /* Update original content and set clean state */
+    update_original_content(dm);
+    set_document_state(dm, DOC_STATE_CLEAN);
+
+    g_debug("File opened with existing content: %s", file_path);
     return TRUE;
 }
 
@@ -1229,20 +1282,10 @@ gboolean document_manager_open_draft(DocumentManager *dm, const gchar *draft_pat
     g_return_val_if_fail(dm != NULL, FALSE);
     g_return_val_if_fail(draft_path != NULL, FALSE);
     
-    /* Load draft content */
-    g_autofree gchar *content = NULL;
-    if (!g_file_get_contents(draft_path, &content, NULL, error)) {
+    /* Load draft content into buffer using consolidated function */
+    if (!load_content_into_buffer(dm, draft_path, error)) {
         return FALSE;
     }
-    
-    /* Clear buffer and load draft content */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
-    gtk_text_buffer_delete(dm->buffer, &start, &end);
-    gtk_text_buffer_insert_at_cursor(dm->buffer, content, -1);
-
-    /* Apply theme colors to any existing tags after loading content */
-    theme_styles_update_theme_dependent_tags(dm->buffer);
 
     /* Update document state */
     g_free(dm->draft_path);
@@ -1369,20 +1412,10 @@ gboolean document_manager_resolve_conflict(DocumentManager *dm,
     g_return_val_if_fail(dm->file_path != NULL, FALSE);
     
     if (use_external) {
-        /* Use external version - reload from file */
-        g_autofree gchar *external_content = load_external_content(dm, error);
-        if (!external_content) {
+        /* Use external version - reload from file using consolidated function */
+        if (!load_content_into_buffer(dm, dm->file_path, error)) {
             return FALSE;
         }
-        
-        /* Clear buffer and load external content */
-        GtkTextIter start, end;
-        gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
-        gtk_text_buffer_delete(dm->buffer, &start, &end);
-        gtk_text_buffer_insert_at_cursor(dm->buffer, external_content, -1);
-
-        /* Apply theme colors to any existing tags after loading content */
-        theme_styles_update_theme_dependent_tags(dm->buffer);
         
         /* Update metadata and state */
         update_file_metadata(dm);

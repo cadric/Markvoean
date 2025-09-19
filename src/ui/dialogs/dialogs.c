@@ -17,6 +17,7 @@
 #include <gtktext/ui/dialogs.h>
 #include <gtktext/document/document_manager.h>
 #include <gtktext/ui/file_actions.h>
+#include <gtktext/ui/tab_manager.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HELPERS - Utility functions for dialog management
@@ -105,12 +106,38 @@ void dialogs_on_autorecover_dialog_response(AdwAlertDialog *dialog, const char *
     if (g_strcmp0(response, "recover") == 0) {
         g_message("User chose to recover from autosave: %s", autosave_path);
 
-        /* Load the autosave file content */
+        /* Load the autosave file content and create new document */
         g_autofree char *contents = NULL;
         gsize length = 0;
         if (g_file_get_contents(autosave_path, &contents, &length, NULL)) {
-            /* TODO: Integrate with application to load content */
             g_message("Loaded %zu bytes from autosave file", length);
+
+            /* Get the application context from the main window */
+            GtkWindow *window = gtk_application_get_active_window(GTK_APPLICATION(g_application_get_default()));
+            if (window) {
+                GtkApplication *app = gtk_window_get_application(window);
+                TabManager *tm = gtktext_get_tab_manager(app);
+
+                if (tm) {
+                    /* Create new document tab with recovered content */
+                    AdwTabPage *page = tab_manager_new_document(tm, "Recovered Document");
+                    if (page) {
+                        GtkWidget *text_view = tab_manager_get_text_view(tm, page);
+                        if (text_view) {
+                            GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+                            if (buffer) {
+                                /* Insert recovered content */
+                                gtk_text_buffer_set_text(buffer, contents, -1);
+                                g_message("Successfully recovered autosave content to new document");
+                            }
+                        }
+                    }
+                } else {
+                    g_warning("Could not get TabManager for autorecover");
+                }
+            } else {
+                g_warning("Could not get active window for autorecover");
+            }
         }
 
         /* Remove the autosave file after successful recovery */

@@ -53,8 +53,10 @@ DocumentManager* document_manager_new(GtkTextBuffer *buffer, GtkWindow *window);
 void document_manager_free(DocumentManager *dm);
 
 /* Document operations */
-gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path, 
+gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
                                    GError **error);
+gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
+                                                const gchar *content, GError **error);
 gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog, 
                               SaveCompleteCallback callback, gpointer user_data);
 gboolean document_manager_save_as(DocumentManager *dm, const gchar *file_path,

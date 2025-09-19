@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Per-tab document container for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.0] - 2025-09-17 - ui/tab_document.c
-   Created: Document container for tab-based editing
+   [1.4.2] - 2025-09-19 - ui/tab_document.c
+   Changed: Updated to use document_manager_open_file_with_content
 */
 
 #ifdef HAVE_CONFIG_H
@@ -601,9 +601,9 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
     g_autofree char *basename = g_path_get_basename(file_path);
     td->tab_title = g_steal_pointer(&basename);
 
-    /* Update DocumentManager with file path */
+    /* Update DocumentManager with file path and content (avoid double read) */
     if (td->doc_manager) {
-        document_manager_open_file(td->doc_manager, file_path, NULL);
+        document_manager_open_file_with_content(td->doc_manager, file_path, contents, NULL);
     }
 
     /* Note: tab_document_set_modified(td, FALSE) will be called after deferred rendering completes */

@@ -1,8 +1,8 @@
-# [1.3.3] - 2025-09-18 - meson.build
-# Changed: Enhanced GNOME compliance - AppStream metadata, application ID consistency, modern desktop file
+# [1.4.2] - 2025-09-19 - meson.build
+# Changed: Code consolidation - eliminated duplicate file loading logic and unified dialog handlers
 
 project('gtktext', 'c',
-  version: '1.4.1',
+  version: '1.4.2',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

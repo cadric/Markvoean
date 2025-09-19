@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [1.4.2] - 2025-09-19
+
+### Changed
+- **Code Consolidation**: Eliminated duplicate file loading logic between `tab_document_load_file` and `document_manager_open_file`
+- **Function Unification**: Created shared helper `file_action_handle_open_dialog_result` to consolidate duplicate dialog handlers
+- **Performance**: Reduced double file reading by introducing `document_manager_open_file_with_content` function
+- **Maintainability**: Removed ~70 lines of duplicate code across multiple files
+
+### Technical Details
+- Added `document_manager_open_file_with_content()` to avoid reading files twice
+- Consolidated `document_handlers_on_open_file_dialog_finish` and `file_action_on_open_dialog_finish` to use shared logic
+- Simplified buffer loading pattern with centralized `load_content_into_buffer()` helper
+- Cleaned up unused constants and deprecated code paths
+
 ## [1.4.1] - 2025-09-18
 
 ### Fixed

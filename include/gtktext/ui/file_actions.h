@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: File action callbacks (open, save, save-as)
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.1] - 2025-09-16 - ui/file_actions.h
-   Changed: Extracted file actions from main.c for better organization
+   [1.4.2] - 2025-09-19 - ui/file_actions.h
+   Changed: Added shared helper function declaration
 */
 
 #ifndef GTKTEXT_UI_FILE_ACTIONS_H
@@ -31,6 +31,8 @@ void file_action_on_save_as_dialog_finish_tab(GObject *source_object, GAsyncResu
 /* Helper functions */
 void file_action_setup_open_dialog_filters(GtkFileDialog *dialog);
 void file_action_setup_save_dialog_filters(GtkFileDialog *dialog);
+gboolean file_action_handle_open_dialog_result(GFile *file, GtkApplication *app,
+                                              gboolean open_in_new_tab, GError **error);
 
 G_END_DECLS
 
