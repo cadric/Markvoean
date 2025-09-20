@@ -6,6 +6,7 @@
 - Build, run, test locally.
 - No main‑loop blocking, no new warnings.
 - Update version + changelog.
+- KISS principle
 ---
 ## 🧭 Guiding Principles
 
@@ -56,10 +57,10 @@
 - **Threading**: UI only on main thread; use `GTask`/workers for work.
 - **Errors**: `GError**` for recoverable failures; never `exit()` for normal errors.
 
-**Ultra‑Min C Module Template (mandatory at top)**
+**Ultra‑Min C Module Template**
 
 ```c
-/* C ULTRA‑MIN TEMPLATE
+/* C
    Purpose: [short]
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
 */
@@ -101,7 +102,7 @@ static void setup_logging(void){
 - Provide accelerators + shortcuts window.
 - Support dark mode automatically; never hardcode palette.
 
-**GtkBuilder ultra‑min**
+**GtkBuilder**
 
 ```xml
 <interface>
