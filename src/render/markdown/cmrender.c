@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: CommonMark markdown rendering engine with GTK text buffer integration
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.3.8] - 2025-09-18 - render/markdown/cmrender.c
-   Changed: Restructured to follow Ultra-Min template sections for better organization
+   [1.4.0] - 2025-09-20 - render/markdown/cmrender.c
+   Added: cm_render_selection_to_markdown function for preserving formatting in selections
 */
 
 #ifdef HAVE_CONFIG_H
@@ -602,7 +602,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
                      "background-rgba", NULL,
                      "paragraph-background", codeblock_bg_color,
                      "foreground", codeblock_fg_color,
-                     "background-full-height", FALSE,
+                     "background-full-height", TRUE,
                      NULL);
     } else {
          g_warning("Failed to get or create 'codeblock' tag during theme update.");
@@ -615,7 +615,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
                      "background-rgba", NULL,
                      "paragraph-background", codeblock_bg_color,
                      "foreground", codeblock_fg_color,
-                     "background-full-height", FALSE,
+                     "background-full-height", TRUE,
                      NULL);
     } else {
          g_warning("Failed to get or create 'codeblock_indented' tag during theme update.");
@@ -2099,4 +2099,347 @@ advance_only:
     }
 
     return g_string_free(md, FALSE); // Return the string and free the GString container
+}
+
+char* cm_render_selection_to_markdown(GtkTextBuffer *buffer, const GtkTextIter *start_iter, const GtkTextIter *end_iter) {
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), g_strdup(""));
+    g_return_val_if_fail(start_iter != NULL, g_strdup(""));
+    g_return_val_if_fail(end_iter != NULL, g_strdup(""));
+
+    // Check if selection is valid and not empty
+    if (gtk_text_iter_equal(start_iter, end_iter)) {
+        g_debug("[export] Empty selection, returning empty string");
+        return g_strdup("");
+    }
+
+    // Ensure start comes before end
+    GtkTextIter start_copy = *start_iter;
+    GtkTextIter end_copy = *end_iter;
+    gtk_text_iter_order(&start_copy, &end_copy);
+
+    // Check user preference for heading format
+    g_autoptr(GSettings) settings = g_settings_new("org.gtk.gtktext");
+    g_autofree gchar *heading_format = g_settings_get_string(settings, "heading-format");
+    gboolean use_setext = g_strcmp0(heading_format, "setext") == 0;
+
+    GString *md = g_string_new("");
+    GtkTextIter iter = start_copy;
+
+    gboolean currently_in_bold = FALSE;
+    gboolean currently_in_italic = FALSE;
+    gboolean currently_in_code = FALSE;
+    gboolean currently_in_codeblock = FALSE;
+    gboolean currently_in_link = FALSE;
+    const char *current_link_url = NULL;
+    const char *current_link_title = NULL;
+    GString *current_link_text = NULL;
+    gboolean at_line_start = TRUE;
+
+    // Setext heading support
+    gboolean currently_in_heading = FALSE;
+    int current_heading_level = 0;
+    GString *current_heading_text = NULL;
+
+    GtkTextTagTable *tag_table = gtk_text_buffer_get_tag_table(buffer);
+
+    while (!gtk_text_iter_equal(&iter, &end_copy)) {
+        gunichar current_char = gtk_text_iter_get_char(&iter);
+
+        // Check for child anchors (embedded widgets like images or HR)
+        GtkTextChildAnchor *child_anchor = gtk_text_iter_get_child_anchor(&iter);
+        if (child_anchor) {
+            // First check if this is an HR anchor
+            if (g_object_get_data(G_OBJECT(child_anchor), "hr-widget")) {
+                g_string_append(md, "---\n");
+                gtk_text_iter_forward_char(&iter);
+                continue;
+            }
+
+            // Get the widgets attached to this anchor
+            guint widget_count = 0;
+            GtkWidget **widgets = gtk_text_child_anchor_get_widgets(child_anchor, &widget_count);
+
+            for (guint i = 0; i < widget_count; i++) {
+                GtkWidget *widget = widgets[i];
+
+                // Check if this is an HR widget
+                if (GTKTEXT_IS_HR_WIDGET(widget)) {
+                    g_string_append(md, "---\n");
+                    break;
+                }
+
+                // Check if this is an image widget
+                const char *image_url = g_object_get_data(G_OBJECT(widget), "image-url");
+                const char *image_alt = g_object_get_data(G_OBJECT(widget), "image-alt");
+
+                if (image_url) {
+                    g_debug("[export] Found image widget with URL: %s, alt: %s",
+                           image_url, image_alt ? image_alt : "(none)");
+
+                    const char *link_url = g_object_get_data(G_OBJECT(widget), "open-url");
+                    if (!link_url || !*link_url || g_strcmp0(link_url, image_url) == 0) {
+                        // No clickable link, just an image
+                        g_string_append_printf(md, "![%s](%s)",
+                                             image_alt ? image_alt : "", image_url);
+                    } else {
+                        // Clickable image
+                        g_string_append_printf(md, "[![%s](%s)](%s)",
+                                             image_alt ? image_alt : "", image_url, link_url);
+                    }
+                    break;
+                }
+            }
+            g_free(widgets);
+            gtk_text_iter_forward_char(&iter);
+            continue;
+        }
+
+        // Get all tags at this position
+        GSList *tags = gtk_text_iter_get_tags(&iter);
+
+        // Check for various formatting tags
+        gboolean iter_is_bold = FALSE;
+        gboolean iter_is_italic = FALSE;
+        gboolean iter_is_code = FALSE;
+        gboolean iter_is_codeblock_char = FALSE;
+        gboolean iter_is_heading = FALSE;
+        int iter_heading_level = 0;
+        gboolean iter_is_link = FALSE;
+        const char *iter_link_url = NULL;
+        const char *iter_link_title = NULL;
+        const char *iter_code_info = NULL;
+
+        for (GSList *tagp = tags; tagp != NULL; tagp = tagp->next) {
+            GtkTextTag *tag = GTK_TEXT_TAG(tagp->data);
+            const char *tag_name = get_tag_name_safe(tag);
+
+            if (!tag_name) continue;
+
+            if (g_strcmp0(tag_name, "bold") == 0) {
+                iter_is_bold = TRUE;
+            } else if (g_strcmp0(tag_name, "italic") == 0) {
+                iter_is_italic = TRUE;
+            } else if (g_strcmp0(tag_name, "code") == 0) {
+                iter_is_code = TRUE;
+            } else if (g_str_has_prefix(tag_name, "codeblock")) {
+                iter_is_codeblock_char = TRUE;
+                if (g_str_has_prefix(tag_name, "codeblock_")) {
+                    iter_code_info = tag_name + 10; // Skip "codeblock_"
+                }
+            } else if (g_str_has_prefix(tag_name, "heading_")) {
+                iter_is_heading = TRUE;
+                iter_heading_level = g_ascii_digit_value(tag_name[8]);
+            } else if (g_str_has_prefix(tag_name, "link_")) {
+                iter_is_link = TRUE;
+                iter_link_url = g_object_get_data(G_OBJECT(tag), "link-url");
+                iter_link_title = g_object_get_data(G_OBJECT(tag), "link-title");
+            }
+        }
+        g_slist_free(tags);
+
+        // Handle heading changes
+        if (iter_is_heading != currently_in_heading || iter_heading_level != current_heading_level) {
+            if (currently_in_heading && current_heading_text && current_heading_text->len > 0) {
+                // End current heading
+                if (use_setext && (current_heading_level == 1 || current_heading_level == 2)) {
+                    // Use setext style for h1 and h2
+                    g_string_append_c(md, '\n');
+                    char underline_char = (current_heading_level == 1) ? '=' : '-';
+                    for (gsize i = 0; i < current_heading_text->len; i++) {
+                        g_string_append_c(md, underline_char);
+                    }
+                    g_string_append_c(md, '\n');
+                } else {
+                    // Use ATX style
+                    g_string_append_c(md, '\n');
+                }
+                g_string_free(current_heading_text, TRUE);
+                current_heading_text = NULL;
+            }
+
+            if (iter_is_heading) {
+                // Start new heading
+                if (use_setext && (iter_heading_level == 1 || iter_heading_level == 2)) {
+                    // For setext, just collect the text
+                    current_heading_text = g_string_new("");
+                } else {
+                    // For ATX, add the prefix
+                    for (int i = 0; i < iter_heading_level; i++) {
+                        g_string_append_c(md, '#');
+                    }
+                    g_string_append_c(md, ' ');
+                }
+            }
+
+            currently_in_heading = iter_is_heading;
+            current_heading_level = iter_heading_level;
+        }
+
+        // Handle link changes
+        if (iter_is_link != currently_in_link ||
+            (iter_is_link && g_strcmp0(iter_link_url, current_link_url) != 0)) {
+
+            if (currently_in_link && current_link_text && current_link_text->len > 0) {
+                // End current link
+                g_string_append_printf(md, "](%s", current_link_url ? current_link_url : "");
+                if (current_link_title && *current_link_title) {
+                    g_string_append_printf(md, " \"%s\"", current_link_title);
+                }
+                g_string_append_c(md, ')');
+                g_string_free(current_link_text, TRUE);
+                current_link_text = NULL;
+            }
+
+            if (iter_is_link && iter_link_url && *iter_link_url) {
+                // Start new link
+                g_string_append_c(md, '[');
+                current_link_text = g_string_new("");
+            }
+
+            currently_in_link = iter_is_link;
+            current_link_url = iter_link_url;
+            current_link_title = iter_link_title;
+        }
+
+        // Handle code block changes
+        if (iter_is_codeblock_char != currently_in_codeblock) {
+            if (iter_is_codeblock_char && !currently_in_codeblock) {
+                // Start of code block
+                if (at_line_start) {
+                    GtkTextTag *codeblock_tag = gtk_text_tag_table_lookup(tag_table, "codeblock");
+                    GtkTextTag *codeblock_indented_tag = gtk_text_tag_table_lookup(tag_table, "codeblock_indented");
+                    gboolean is_fenced_block = codeblock_tag && gtk_text_iter_has_tag(&iter, codeblock_tag);
+                    gboolean is_indented_block = codeblock_indented_tag && gtk_text_iter_has_tag(&iter, codeblock_indented_tag);
+
+                    if (is_fenced_block) {
+                        if (iter_code_info && *iter_code_info) {
+                            g_string_append_printf(md, "```%s\n", iter_code_info);
+                        } else {
+                            g_string_append(md, "```\n");
+                        }
+                        currently_in_codeblock = TRUE;
+                    } else if (is_indented_block) {
+                        // For indented code blocks, we don't add fence markers
+                        currently_in_codeblock = TRUE;
+                    }
+                }
+            }
+        }
+
+        // Handle end of code block
+        if (currently_in_codeblock && !iter_is_codeblock_char && current_char != '\n') {
+            if (md->len > 0 && md->str[md->len -1] != '\n') {
+                g_string_append_c(md, '\n');
+            }
+            g_string_append(md, "```\n");
+            currently_in_codeblock = FALSE;
+        }
+
+        if (currently_in_codeblock) {
+            g_string_append_unichar(md, current_char);
+        } else {
+            // Skip object replacement or zero-width characters in export
+            if (current_char == 0xFFFC || current_char == 0x200B) {
+                goto advance_only;
+            }
+
+            // Handle bold/italic inline formatting
+            if (iter_is_bold && iter_is_italic && !currently_in_bold && !currently_in_italic) {
+                g_string_append(md, "***");
+                currently_in_bold = TRUE;
+                currently_in_italic = TRUE;
+            } else if (!iter_is_bold && !iter_is_italic && currently_in_bold && currently_in_italic) {
+                g_string_append(md, "***");
+                currently_in_bold = FALSE;
+                currently_in_italic = FALSE;
+            } else {
+                if (iter_is_bold && !currently_in_bold) {
+                    g_string_append(md, "**");
+                    currently_in_bold = TRUE;
+                } else if (!iter_is_bold && currently_in_bold) {
+                    g_string_append(md, "**");
+                    currently_in_bold = FALSE;
+                }
+
+                if (iter_is_italic && !currently_in_italic) {
+                    g_string_append_c(md, '*');
+                    currently_in_italic = TRUE;
+                } else if (!iter_is_italic && currently_in_italic) {
+                    g_string_append_c(md, '*');
+                    currently_in_italic = FALSE;
+                }
+            }
+
+            // Handle inline code
+            if (iter_is_code && !currently_in_code) {
+                g_string_append_c(md, '`');
+                currently_in_code = TRUE;
+            } else if (!iter_is_code && currently_in_code) {
+                g_string_append_c(md, '`');
+                currently_in_code = FALSE;
+            }
+
+            // Add the character to output
+            if (currently_in_heading && current_heading_text) {
+                g_string_append_unichar(current_heading_text, current_char);
+            }
+            if (currently_in_link && current_link_text) {
+                g_string_append_unichar(current_link_text, current_char);
+            }
+
+            g_string_append_unichar(md, current_char);
+        }
+
+        // Track line start position
+        at_line_start = (current_char == '\n');
+
+advance_only:
+        gtk_text_iter_forward_char(&iter);
+    }
+
+    // Close any remaining open formatting
+    if (currently_in_link && current_link_text) {
+        g_string_append_printf(md, "](%s", current_link_url ? current_link_url : "");
+        if (current_link_title && *current_link_title) {
+            g_string_append_printf(md, " \"%s\"", current_link_title);
+        }
+        g_string_append_c(md, ')');
+        g_string_free(current_link_text, TRUE);
+    }
+
+    if (currently_in_heading && current_heading_text && current_heading_text->len > 0) {
+        if (use_setext && (current_heading_level == 1 || current_heading_level == 2)) {
+            g_string_append_c(md, '\n');
+            char underline_char = (current_heading_level == 1) ? '=' : '-';
+            for (gsize i = 0; i < current_heading_text->len; i++) {
+                g_string_append_c(md, underline_char);
+            }
+            g_string_append_c(md, '\n');
+        }
+        g_string_free(current_heading_text, TRUE);
+    }
+
+    if (currently_in_codeblock) {
+        if (md->len > 0 && md->str[md->len -1] != '\n') {
+            g_string_append_c(md, '\n');
+        }
+        g_string_append(md, "```\n");
+    }
+
+    if (currently_in_bold && currently_in_italic) {
+        g_string_append(md, "***");
+    } else {
+        if (currently_in_bold) {
+            g_string_append(md, "**");
+        }
+        if (currently_in_italic) {
+            g_string_append_c(md, '*');
+        }
+    }
+
+    if (currently_in_code) {
+        g_string_append_c(md, '`');
+    }
+
+    return g_string_free(md, FALSE);
 }

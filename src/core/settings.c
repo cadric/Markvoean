@@ -10,8 +10,10 @@
 #include <gtktext/core/settings_manager.h>
 
 /* ========== META ========== */
-/* [1.0.1] - 2025-09-16 - src/settings.c
-   Changed: Removed legacy autosave settings - DocumentManager handles autosave internally
+/* [1.1.0] - 2025-09-20 - src/settings.c
+   Added: Modern AdwClamp boxed list pattern for toolbar button order display
+   Changed: Improved UX with individual button rows, icons, and position indicators
+   Fixed: Better accessibility and visual hierarchy in preferences dialog
  */
 
 /* ========== TYPES ========== */
@@ -250,42 +252,96 @@ AdwDialog* create_settings_window(GtkWindow *parent) {
     adw_preferences_group_set_description(settings_state.toolbar_order_group,
                                          _("Customize the order of toolbar buttons"));
 
-    // Create info row about button order
+    // Create modern boxed list for button order display using AdwClamp pattern
     g_auto(GStrv) button_order = g_settings_get_strv(settings_state.settings, "toolbar-button-order");
-    GString *order_text = g_string_new(_("Current order: "));
-    for (int i = 0; button_order[i] != NULL; i++) {
-        if (i > 0) g_string_append(order_text, " → ");
 
-        // Translate button IDs to user-friendly names
-        const char *display_name = button_order[i];
-        if (g_strcmp0(button_order[i], "bold") == 0) {
-            display_name = _("Bold");
-        } else if (g_strcmp0(button_order[i], "italic") == 0) {
-            display_name = _("Italic");
-        } else if (g_strcmp0(button_order[i], "code") == 0) {
-            display_name = _("Code");
-        } else if (g_strcmp0(button_order[i], "heading") == 0) {
-            display_name = _("Heading");
-        } else if (g_strcmp0(button_order[i], "hr") == 0) {
-            display_name = _("Horizontal Rule");
-        } else if (g_strcmp0(button_order[i], "source") == 0) {
-            display_name = _("Source View");
-        }
-        g_string_append(order_text, display_name);
+    // Create AdwClamp container for adaptive padding
+    GtkWidget *clamp = adw_clamp_new();
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 400);
+
+    // Create container box with proper margins
+    GtkWidget *container_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(container_box, 12);
+    gtk_widget_set_margin_bottom(container_box, 12);
+    gtk_widget_set_margin_start(container_box, 12);
+    gtk_widget_set_margin_end(container_box, 12);
+
+    // Create boxed list for button order items
+    GtkWidget *button_list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(button_list), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(button_list, "boxed-list");
+
+    // Helper function to get user-friendly button names
+    const char* get_button_display_name(const char* button_id) {
+        if (g_strcmp0(button_id, "bold") == 0) return _("Bold");
+        if (g_strcmp0(button_id, "italic") == 0) return _("Italic");
+        if (g_strcmp0(button_id, "code") == 0) return _("Code");
+        if (g_strcmp0(button_id, "heading") == 0) return _("Heading");
+        if (g_strcmp0(button_id, "hr") == 0) return _("Horizontal Rule");
+        if (g_strcmp0(button_id, "source") == 0) return _("Source View");
+        return button_id; // Fallback to ID if not found
     }
 
-    GtkWidget *order_label = gtk_label_new(order_text->str);
-    gtk_widget_set_margin_top(order_label, 12);
-    gtk_widget_set_margin_bottom(order_label, 12);
-    gtk_widget_set_margin_start(order_label, 12);
-    gtk_widget_set_margin_end(order_label, 12);
-    gtk_label_set_wrap(GTK_LABEL(order_label), TRUE);
-    adw_preferences_group_add(settings_state.toolbar_order_group, order_label);
+    // Helper function to get button icons
+    const char* get_button_icon_name(const char* button_id) {
+        if (g_strcmp0(button_id, "bold") == 0) return "format-text-bold-symbolic";
+        if (g_strcmp0(button_id, "italic") == 0) return "format-text-italic-symbolic";
+        if (g_strcmp0(button_id, "code") == 0) return "text-x-generic-symbolic";
+        if (g_strcmp0(button_id, "heading") == 0) return "format-text-larger-symbolic";
+        if (g_strcmp0(button_id, "hr") == 0) return "format-horizontal-rule-symbolic";
+        if (g_strcmp0(button_id, "source") == 0) return "text-x-script-symbolic";
+        return "application-x-executable-symbolic"; // Generic fallback
+    }
+
+    // Create individual rows for each button with position indicators
+    for (int i = 0; button_order[i] != NULL; i++) {
+        GtkWidget *row = adw_action_row_new();
+
+        // Set title and subtitle
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row),
+                                    get_button_display_name(button_order[i]));
+
+        // Create subtitle with position
+        g_autofree char *subtitle = g_strdup_printf(_("Position %d"), i + 1);
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), subtitle);
+
+        // Add icon prefix
+        GtkWidget *icon = gtk_image_new_from_icon_name(get_button_icon_name(button_order[i]));
+        gtk_widget_add_css_class(icon, "dim-label");
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row), icon);
+
+        // Add drag handle suffix for visual indication
+        GtkWidget *drag_icon = gtk_image_new_from_icon_name("list-drag-handle-symbolic");
+        gtk_widget_add_css_class(drag_icon, "dim-label");
+        adw_action_row_add_suffix(ADW_ACTION_ROW(row), drag_icon);
+
+        gtk_list_box_append(GTK_LIST_BOX(button_list), row);
+    }
+
+    // Add explanatory text if no buttons configured
+    if (g_strv_length(button_order) == 0) {
+        GtkWidget *empty_row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(empty_row),
+                                    _("No toolbar buttons configured"));
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(empty_row),
+                                   _("Enable customization to configure button order"));
+
+        GtkWidget *empty_icon = gtk_image_new_from_icon_name("dialog-information-symbolic");
+        gtk_widget_add_css_class(empty_icon, "dim-label");
+        adw_action_row_add_prefix(ADW_ACTION_ROW(empty_row), empty_icon);
+
+        gtk_list_box_append(GTK_LIST_BOX(button_list), empty_row);
+    }
+
+    // Assemble the modern layout: Container > Box > List
+    gtk_box_append(GTK_BOX(container_box), button_list);
+    adw_clamp_set_child(ADW_CLAMP(clamp), container_box);
+
+    // Add the modern clamp container to preferences group
+    adw_preferences_group_add(settings_state.toolbar_order_group, clamp);
 
     // Show/hide based on customization state
     gtk_widget_set_visible(GTK_WIDGET(settings_state.toolbar_order_group), customization_enabled);
-
-    g_string_free(order_text, TRUE);
 
     // Add groups to page
     adw_preferences_page_add(page, toolbar_group);

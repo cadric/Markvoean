@@ -1,8 +1,8 @@
-# [2.0.0] - 2025-09-20 - meson.build
-# Changed: Phase 3 major bump - Clean API surface, conflict resolution, typed render helpers
+# [2.1.2] - 2025-09-20 - meson.build
+# Enhanced: Copy function now preserves markdown formatting when copying selections
 
 project('gtktext', 'c',
-  version: '2.0.0',
+  version: '2.1.2',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

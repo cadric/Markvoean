@@ -118,7 +118,7 @@ GtkTextTag* tag_manager_get_or_create_base_tag(GtkTextBuffer *buffer, const char
             // Basic properties for inline code - should align with normal text (0px left margin)
             tag = gtk_text_buffer_create_tag(buffer, "code",
                                              "family", "monospace",
-                                             "background-full-height", TRUE,
+                                             "background-full-height", FALSE,
                                              "left-margin", 0,
                                              "right-margin", 0,
                                              "pixels-above-lines", 1,

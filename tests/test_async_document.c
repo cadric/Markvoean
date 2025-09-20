@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: GLib tests for DocumentManager async open/save operations
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.0] - 2025-09-19 - tests/test_async_document.c
-   Phase 2: Comprehensive async I/O testing
+   [1.0.1] - 2025-09-20 - tests/test_async_document.c
+   Fixed: Proper DocumentManager cleanup to prevent file monitor warnings in tests
 */
 
 #ifdef HAVE_CONFIG_H
@@ -194,6 +194,17 @@ static void test_document_manager_async_open_success(void)
     g_assert_cmpstr(buffer_text, ==, TEST_TEXT_CONTENT);
     g_free(buffer_text);
 
+    /* Free DocumentManager first to stop file monitoring before cleanup */
+    if (ctx->dm) {
+        document_manager_free(ctx->dm);
+        ctx->dm = NULL;
+    }
+
+    /* Process any pending events to ensure file monitor is properly stopped */
+    while (g_main_context_pending(NULL)) {
+        g_main_context_iteration(NULL, FALSE);
+    }
+
     cleanup_test_file(TEST_FILE_PATH);
     async_test_context_free(ctx);
 }
@@ -358,6 +369,17 @@ static void test_document_manager_open_then_save_cycle(void)
     g_assert_nonnull(saved_content);
     g_assert_cmpstr(saved_content, ==, TEST_TEXT_MODIFIED);
     g_free(saved_content);
+
+    /* Free DocumentManager first to stop file monitoring before cleanup */
+    if (ctx->dm) {
+        document_manager_free(ctx->dm);
+        ctx->dm = NULL;
+    }
+
+    /* Process any pending events to ensure file monitor is properly stopped */
+    while (g_main_context_pending(NULL)) {
+        g_main_context_iteration(NULL, FALSE);
+    }
 
     cleanup_test_file(TEST_FILE_PATH);
     async_test_context_free(ctx);

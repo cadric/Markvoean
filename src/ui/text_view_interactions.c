@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Text view interaction handlers and utilities for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.8] - 2025-09-16 - ui/text_view_interactions.c
-   Fixed: GTK allocation warnings and modernized to GTK4 APIs
+   [1.1.1] - 2025-09-20 - ui/text_view_interactions.c
+   Enhanced: Copy function now preserves markdown formatting when copying selections
 */
 
 #ifdef HAVE_CONFIG_H
@@ -271,28 +271,47 @@ void text_view_copy_selected_as_markdown(GtkTextView *text_view)
     if (!text_view) return;
 
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
-    if (!gtk_text_buffer_get_has_selection(buffer)) {
-        return; /* No selection to copy */
-    }
-
-    /* Get selected text range */
     GtkTextIter start, end;
-    gtk_text_buffer_get_selection_bounds(buffer, &start, &end);
+    g_autofree char *markdown_to_copy = NULL;
 
-    /* Use the rendering engine to export to markdown */
-    char *markdown = cm_render_buffer_to_markdown(buffer);
-    if (!markdown) {
-        g_warning("Failed to export buffer to markdown");
-        return;
+    if (gtk_text_buffer_get_has_selection(buffer)) {
+        /* Copy selected text with formatting preserved */
+        gtk_text_buffer_get_selection_bounds(buffer, &start, &end);
+        markdown_to_copy = cm_render_selection_to_markdown(buffer, &start, &end);
+
+        if (markdown_to_copy && *markdown_to_copy) {
+            GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(text_view));
+            gdk_clipboard_set_text(clipboard, markdown_to_copy);
+            g_debug("Copied selected markdown to clipboard: '%.*s%s'",
+                    (int)MIN(strlen(markdown_to_copy), 50), markdown_to_copy,
+                    strlen(markdown_to_copy) > 50 ? "..." : "");
+        } else {
+            g_debug("Selection is empty, nothing to copy");
+        }
+    } else {
+        /* No selection - copy current line with formatting preserved */
+        GtkTextMark *cursor_mark = gtk_text_buffer_get_insert(buffer);
+        gtk_text_buffer_get_iter_at_mark(buffer, &start, cursor_mark);
+
+        /* Get start and end of current line */
+        gtk_text_iter_set_line_offset(&start, 0);
+        end = start;
+        if (!gtk_text_iter_ends_line(&end)) {
+            gtk_text_iter_forward_to_line_end(&end);
+        }
+
+        markdown_to_copy = cm_render_selection_to_markdown(buffer, &start, &end);
+
+        if (markdown_to_copy && *markdown_to_copy) {
+            GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(text_view));
+            gdk_clipboard_set_text(clipboard, markdown_to_copy);
+            g_debug("No selection - copied current line markdown to clipboard: '%.*s%s'",
+                    (int)MIN(strlen(markdown_to_copy), 50), markdown_to_copy,
+                    strlen(markdown_to_copy) > 50 ? "..." : "");
+        } else {
+            g_debug("Current line is empty, nothing to copy");
+        }
     }
-
-    /* For now, we copy the full buffer's markdown since we don't have
-     * a selection-only export function. This could be improved. */
-    GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(text_view));
-    gdk_clipboard_set_text(clipboard, markdown);
-
-    g_free(markdown);
-    g_debug("Copied buffer as markdown to clipboard");
 }
 
 /* Callback to set up overlay when widget is mapped (safer than realized) */

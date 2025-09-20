@@ -51,6 +51,22 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer);
 char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer);
 
 /**
+ * @brief Exports only the selected portion of a GtkTextBuffer to CommonMark, preserving formatting.
+ *
+ * This function extracts the currently selected text range and exports it to markdown
+ * while preserving all formatting tags (bold, italic, code, links, etc.). If no selection
+ * exists, it returns an empty string.
+ *
+ * @param buffer The GtkTextBuffer to export from.
+ * @param start_iter Iterator pointing to the start of the selection.
+ * @param end_iter Iterator pointing to the end of the selection.
+ * @return A newly allocated string containing the Markdown representation of the selection.
+ *         The caller is responsible for freeing this string with g_free().
+ *         Returns an empty string if the selection is empty or invalid.
+ */
+char* cm_render_selection_to_markdown(GtkTextBuffer *buffer, const GtkTextIter *start_iter, const GtkTextIter *end_iter);
+
+/**
  * @brief Schedules a re-parse of the entire buffer to update markdown rendering.
  * 
  * This function schedules a delayed re-rendering of the markdown content in the buffer.

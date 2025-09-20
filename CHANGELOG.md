@@ -17,6 +17,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [2.1.2] - 2025-09-20
+
+**PATCH RELEASE: Enhanced Copy with Formatting Preservation**
+
+### Enhanced
+- **Copy function**: Now preserves markdown formatting (bold, italic, code, links, headers) when copying selections instead of copying plain text
+- **Selection-only export**: Added `cm_render_selection_to_markdown()` function to export selected portions with full formatting preservation
+
+## [2.1.1] - 2025-09-20
+
+**PATCH RELEASE: Copy Function Fix**
+
+### Fixed
+- **Ctrl+C copy behavior**: Now correctly copies only the selected text instead of the entire document
+- Resolves issue where copying a single word would copy the entire markdown content
+- **Enhanced fallback**: When no text is selected, Ctrl+C copies the current line (standard editor behavior)
+- Adds proper debug logging for copy operations
+
+### Technical
+- Updated `text_view_copy_selected_as_markdown()` to extract and copy only selected text
+- Added fallback to copy current line when no selection exists
+- Simplified implementation removes dependency on full buffer markdown export for selections
+- Better user experience with expected copy behavior matching modern text editors
+
+## [2.1.0] - 2025-09-20
+
+**MINOR RELEASE: Modern Libadwaita UI Patterns**
+
+### Added
+- Modern AdwClamp boxed list pattern for settings UI
+- Individual button rows with icons and position indicators in preferences
+- Adaptive padding and proper visual hierarchy in toolbar customization section
+
+### Changed
+- Enhanced preferences dialog with improved UX following latest libadwaita guidelines
+- Better accessibility with proper icons and descriptive subtitles
+- Visual improvement from concatenated text list to structured button display
+
+### Technical
+- Implements modern libadwaita pattern: `AdwClamp` → `GtkBox` → `GtkListBox` with `.boxed-list` style
+- Follows current GNOME HIG guidelines for settings interfaces
+- Maintains full backward compatibility with existing settings
+
+## [2.0.1] - 2025-09-20
+
+**PATCH RELEASE: Code Block Visual Fix**
+
+### Fixed
+- Code block blank lines now properly render with blue background
+- Added zero-width space to empty lines within code blocks for proper styling
+- Preserves all existing functionality while fixing the visual gap
+
 ## [2.0.0] - 2025-09-20
 
 **MAJOR RELEASE: Phase 3 - Clean API Surface & Conflict Resolution**
