@@ -17,6 +17,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [1.6.0] - 2025-09-19
+
+### Changed
+- **Removed UI file reads**: Eliminated all direct `g_file_get_contents` usage from UI layer - all I/O now flows through DocumentManager
+- **Signal architecture**: Replaced `document_manager_set_state_callback()` with proper GObject `g_signal_connect()` patterns
+- **Internal buffer gating**: DocumentManager operations now handle signal blocking internally - UI no longer manages buffer signals
+- **Stricter requirements**: TabDocument operations now require DocumentManager - removed fallback paths for better consistency
+
+### Technical Details
+- Updated `document_manager_adopt_current_buffer()` to handle signal blocking internally
+- Migrated all `document_manager_set_state_callback()` usage to `g_signal_connect()` with "state-changed" signal
+- Removed manual buffer signal management from TabDocument - DocumentManager owns this responsibility
+- Enhanced error handling for missing DocumentManager dependencies
+
+### Deprecated
+- `document_manager_set_state_callback()` - Use `g_signal_connect(dm, "state-changed", callback, user_data)` instead
+
+## [1.5.0] - 2025-09-19
+
+### Added
+- **Async I/O APIs**: New `document_manager_open_async()`, `document_manager_save_async()`, and `document_manager_save_as_async()` functions
+- **Async Load APIs**: New `tab_document_load_file_async()` and `tab_document_load_file_finish()` for non-blocking file loading
+- **GObject Conversion**: DocumentManager is now a proper GObject with `state-changed` signal
+- **Error Domain**: New `GTKTEXT_DOCUMENT_ERROR` domain for consistent error handling across async operations
+
+### Changed
+- **Non-blocking I/O**: All file operations now use GIO async APIs (g_file_load_contents_async, g_file_replace_contents_async)
+- **Unified I/O Layer**: TabDocument and file actions now delegate to DocumentManager for all I/O operations
+- **Signal Architecture**: State changes now emit GObject signals in addition to callback-based notifications
+
+### Technical Details
+- Converted DocumentManager from plain struct to GObject with proper reference counting
+- Implemented atomic file operations using g_file_replace_contents_async for data safety
+- Added backward compatibility shims: existing sync APIs marked deprecated but functional
+- **Complete async migration**: All file I/O operations now use async APIs - no UI thread blocking
+- Added `tab_document_load_file_async()` and `tab_document_load_file_finish()` for async file loading
+- Updated autosave to use `document_manager_save_async()` - eliminates periodic UI freezes
+- Migrated file dialog handlers and tab manager to use async I/O throughout
+
+### Deprecated
+- `document_manager_save()` - Use `document_manager_save_async()` instead
+- `document_manager_save_as()` - Use `document_manager_save_as_async()` instead
+- `document_manager_open_file()` - Use `document_manager_open_async()` instead
+
 ## [1.4.2] - 2025-09-19
 
 ### Changed

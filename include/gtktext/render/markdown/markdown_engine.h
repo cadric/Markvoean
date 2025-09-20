@@ -17,6 +17,12 @@ G_BEGIN_DECLS
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 /**
+ * Cancel any pending markdown reparse operation
+ * @param buffer Text buffer to cancel reparse for
+ */
+void cancel_pending_reparse_markdown(GtkTextBuffer *buffer);
+
+/**
  * Schedule markdown re-parsing with debouncing
  * @param buffer Text buffer to reparse
  * @param inserted_len Length of inserted text (for optimization)

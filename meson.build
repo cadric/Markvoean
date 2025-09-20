@@ -1,8 +1,8 @@
-# [1.4.2] - 2025-09-19 - meson.build
-# Changed: Code consolidation - eliminated duplicate file loading logic and unified dialog handlers
+# [1.6.0] - 2025-09-19 - meson.build
+# Changed: Phase 2 async migration - Removed UI file reads, signal patterns, internal buffer gating
 
 project('gtktext', 'c',
-  version: '1.4.3',
+  version: '1.6.0',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

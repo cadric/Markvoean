@@ -168,8 +168,9 @@ void app_initialization_activate(GApplication *application)
     g_object_set_data_full(G_OBJECT(app), "doc_manager", doc_manager,
                           (GDestroyNotify)document_manager_free);
 
-    /* Register DocumentManager callbacks */
-    document_manager_set_state_callback(doc_manager, event_handlers_on_document_state_changed, app);
+    /* Connect to DocumentManager state-changed signal */
+    g_signal_connect(doc_manager, "state-changed",
+                    G_CALLBACK(event_handlers_on_document_state_changed), app);
 
     /* Set up settings monitoring through settings manager */
     settings_manager_initialize_document_settings(app, doc_manager);

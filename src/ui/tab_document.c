@@ -21,6 +21,7 @@
 #include <gtktext/ui/event_handlers.h>
 #include <gtktext/ui/status_manager.h>
 #include <gtktext/render/markdown/markdown_engine.h>
+#include <gtktext/render/theme_styles.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Internal type definitions
@@ -668,17 +669,42 @@ gboolean tab_document_load_file_finish(TabDocument *td, GAsyncResult *result, GE
             g_autofree char *basename = g_path_get_basename(td->file_path);
             td->tab_title = g_steal_pointer(&basename);
 
-            /* Handle markdown rendering for loaded content */
+            /* Handle markdown rendering for loaded content - use deferred rendering */
             if (g_str_has_suffix(loaded_path, ".md")) {
+                g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+                g_debug("ASYNC: Suppressed markdown reparse for async file loading");
+
+                /* Get buffer content for markdown rendering */
                 GtkTextIter start, end;
                 gtk_text_buffer_get_bounds(td->buffer, &start, &end);
                 g_autofree char *buffer_contents = gtk_text_buffer_get_text(td->buffer, &start, &end, FALSE);
 
+                /* Store original content for deferred rendering */
                 g_free(td->pending_markdown_content);
                 td->pending_markdown_content = g_strdup(buffer_contents);
 
+                /* Render immediately for initial display */
                 cm_render_markdown_to_buffer(td->buffer, buffer_contents,
                                             GTK_TEXT_VIEW(td->text_view), NULL);
+
+                /* Apply theme colors to rendered tags */
+                theme_styles_update_theme_dependent_tags(td->buffer);
+                g_debug("ASYNC: Applied theme styles to rendered markdown tags");
+
+                /* Restore suppression flag as cmrender clears it internally */
+                g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+                g_debug("ASYNC: Restored markdown reparse suppression after initial rendering");
+
+                /* Set up callback for when text view becomes mapped */
+                if (!gtk_widget_get_mapped(GTK_WIDGET(td->text_view))) {
+                    g_signal_connect(td->text_view, "map",
+                                   G_CALLBACK(on_text_view_mapped), td);
+                    g_debug("ASYNC: Connected deferred rendering callback for unmapped text view");
+                } else {
+                    /* Text view is already mapped, apply deferred rendering now */
+                    on_text_view_mapped(GTK_WIDGET(td->text_view), td);
+                    g_debug("ASYNC: Applied deferred rendering immediately for mapped text view");
+                }
             }
         }
     }
@@ -1115,6 +1141,9 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
 
     g_debug("Starting WYSIWYG to source sync");
 
+    /* Cancel any pending reparse operations to prevent interference */
+    cancel_pending_reparse_markdown(td->buffer);
+
     /* Block all buffer change signals during sync to prevent false dirty state */
 
     if (td->doc_manager) {
@@ -1137,6 +1166,12 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
     /* Set markdown content in source buffer */
     gtk_text_buffer_set_text(td->source_buffer, markdown, -1);
 
+    /* Update DocumentManager baseline to match current buffer state */
+    if (td->doc_manager) {
+        document_manager_update_baseline(td->doc_manager);
+        g_debug("Updated DocumentManager baseline after WYSIWYG-to-source sync");
+    }
+
     /* Unblock buffer change signals */
 
     if (td->doc_manager) {
@@ -1156,6 +1191,9 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
     g_return_val_if_fail(td->text_view != NULL, FALSE);
 
     g_debug("Starting source to WYSIWYG sync");
+
+    /* Cancel any pending reparse operations to prevent interference */
+    cancel_pending_reparse_markdown(td->buffer);
 
     /* Block all buffer change signals during sync to prevent false dirty state */
 
@@ -1178,6 +1216,15 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
 
     /* Re-render markdown in WYSIWYG view */
     cm_render_markdown_to_buffer(td->buffer, source_markdown, GTK_TEXT_VIEW(td->text_view), NULL);
+
+    /* Cancel any reparse operations that may have been scheduled during rendering */
+    cancel_pending_reparse_markdown(td->buffer);
+
+    /* Update DocumentManager baseline to match the new buffer content */
+    if (td->doc_manager) {
+        document_manager_update_baseline(td->doc_manager);
+        g_debug("Updated DocumentManager baseline after source-to-WYSIWYG sync");
+    }
 
     /* Unblock buffer change signals */
 

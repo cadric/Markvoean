@@ -13,6 +13,7 @@
 #include <gtktext/render/tag_manager.h>
 #include <gtktext/render/theme_styles.h>
 #include <gtktext/render/hr_widget.h>
+#include <gtktext/render/safe_helpers.h>
 #include <adwaita.h>
 #include <gtk/gtk.h>
 #include <libsoup/soup.h>
@@ -657,6 +658,7 @@ void cm_render_update_theme_dependent_tags(GtkTextBuffer *buffer) {
     // Color strings are automatically cleaned up with g_autofree
 }
 
+/* Legacy function - kept for compatibility */
 static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter *iter, const char *text, GSList *active_tags) {
     if (!text || g_utf8_strlen(text, -1) == 0) return;
 
@@ -684,6 +686,37 @@ static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter
         }
     }
     gtk_text_buffer_delete_mark(buffer, start_mark);
+}
+
+/* Safe version using typed helpers - Phase 2 enhancement */
+static SafeRenderResult cm_render_insert_with_active_tags_safe(GtkTextBuffer *buffer,
+                                                              GtkTextIter *iter,
+                                                              const char *text,
+                                                              GSList *active_tags)
+{
+    /* Use safe text insertion with tag application */
+    SafeRenderResult result = safe_buffer_insert_text_with_tags(buffer, iter, text,
+                                                               SAFE_TEXT_MAX_LENGTH,
+                                                               active_tags);
+
+    if (!result.success) {
+        /* Log the error but don't crash - degrade gracefully */
+        if (result.error) {
+            g_warning("Safe text insertion failed: %s", result.error->message);
+            safe_render_result_clear(&result);
+        }
+
+        /* Fallback to basic insertion without tags */
+        SafeRenderResult fallback = safe_buffer_insert_text(buffer, iter, text, SAFE_TEXT_MAX_LENGTH);
+        if (!fallback.success) {
+            g_warning("Fallback text insertion also failed - rendering may be incomplete");
+            return fallback;
+        }
+
+        return safe_render_result_success();
+    }
+
+    return result;
 }
 
 // Recursive function to render content of a node and its children.

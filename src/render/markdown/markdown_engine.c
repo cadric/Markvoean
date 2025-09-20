@@ -194,6 +194,20 @@ static gboolean reparse_markdown_cb(gpointer user_data)
  * PUBLIC API - Markdown processing engine functions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
+void cancel_pending_reparse_markdown(GtkTextBuffer *buffer)
+{
+    g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
+
+    /* Cancel any pending reparse operation */
+    guint existing = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(buffer),
+                                                        DATA_REPARSE_SOURCE_ID));
+    if (existing != 0) {
+        g_source_remove(existing);
+        g_object_set_data(G_OBJECT(buffer), DATA_REPARSE_SOURCE_ID, GUINT_TO_POINTER(0));
+        g_debug("Cancelled pending markdown reparse operation");
+    }
+}
+
 void schedule_reparse_markdown(GtkTextBuffer *buffer, gint inserted_len,
                                const GtkTextIter *at_iter)
 {

@@ -48,6 +48,13 @@ struct _TabManager {
 
 /* Forward declarations removed - using AdwTabView built-in menu system */
 
+/* Context for async file loading callback */
+typedef struct {
+    TabManager *tm;
+    TabDocument *tab_doc;
+    AdwTabPage *page;
+} AsyncLoadContext;
+
 /* Forward declarations */
 static void on_tab_view_page_detached(AdwTabView *tab_view, AdwTabPage *page, gint position, gpointer user_data);
 static gboolean page_belongs_to_view(AdwTabView *tab_view, AdwTabPage *page);
@@ -1020,32 +1027,16 @@ AdwTabPage *tab_manager_open_file(TabManager *tm, const char *file_path)
         return page; /* Return early if can't initialize DocumentManager */
     }
 
+    /* Create async context for callback */
+    AsyncLoadContext *ctx = g_new0(AsyncLoadContext, 1);
+    ctx->tm = tm;
+    ctx->tab_doc = tab_doc;
+    ctx->page = page;
+
     /* Start async file loading AFTER DocumentManager is initialized */
-    /* TODO: Fix async callback crash - using sync loading for now */
-    GError *load_error = NULL;
-    gboolean load_success = tab_document_load_file(tab_doc, file_path, &load_error);
+    tab_document_load_file_async(tab_doc, file_path, NULL, on_tab_document_file_loaded, ctx);
 
-    if (load_success) {
-        /* Update tab title after successful load */
-        tab_manager_update_tab_title(tm, page);
-
-        /* For markdown files, DocumentManager initialization will be finalized
-         * after deferred rendering is complete. For non-markdown files, finalize now. */
-        if (!file_path || !g_str_has_suffix(file_path, ".md")) {
-            DocumentManager *dm = tab_document_get_document_manager(tab_doc);
-            if (dm) {
-                document_manager_finalize_initialization(dm);
-                g_debug("Finalized DocumentManager for non-markdown file");
-            }
-        } else {
-            g_debug("Markdown file loaded - DocumentManager will be finalized after deferred rendering");
-        }
-
-        g_debug("File loaded successfully and tab title updated");
-    } else {
-        g_warning("Failed to load file: %s", load_error ? load_error->message : "Unknown error");
-        g_clear_error(&load_error);
-    }
+    g_debug("Started async file loading for: %s", file_path);
 
     /* Connect selection signal */
     g_signal_connect(page, "notify::selected",
@@ -1271,88 +1262,60 @@ void tab_manager_select_previous_tab(TabManager *tm)
 
 static void on_tab_document_file_loaded(GObject *source_object, GAsyncResult *result, gpointer user_data)
 {
-    /* The source_object is actually the TabDocument since that's what we passed to g_task_new */
-    TabDocument *tab_doc = (TabDocument*)source_object;
-    TabManager *tm = (TabManager*)user_data;
+    /* Source object is DocumentManager, user_data is our context */
+    AsyncLoadContext *ctx = (AsyncLoadContext*)user_data;
     GError *error = NULL;
 
     g_debug("File loaded callback invoked");
 
-    /* Basic null check */
-    if (!tab_doc) {
-        g_warning("Null source object in file load callback");
+    if (!ctx || !ctx->tm || !ctx->tab_doc) {
+        g_warning("Invalid context in file load callback");
+        if (ctx) g_free(ctx);
         return;
     }
 
-    g_debug("TabDocument pointer is valid");
+    g_debug("Calling tab_document_load_file_finish with proper TabDocument context");
 
-    if (!tm) {
-        g_warning("Null TabManager in file load callback");
-        return;
-    }
+    gboolean success = tab_document_load_file_finish(ctx->tab_doc, result, &error);
 
-    g_debug("TabManager pointer is valid");
-
-    if (!result) {
-        g_warning("Null result in file load callback");
-        return;
-    }
-
-    g_debug("About to call tab_document_load_file_finish");
-
-    gboolean success = tab_document_load_file_finish(tab_doc, result, &error);
-
-    g_debug("Called tab_document_load_file_finish, success=%s", success ? "TRUE" : "FALSE");
+    g_debug("tab_document_load_file_finish returned: %s", success ? "TRUE" : "FALSE");
 
     if (success) {
         g_debug("Tab document file loaded successfully");
 
-        /* Find the corresponding tab page for this tab document */
-        AdwTabPage *page = NULL;
-        gint n_pages = adw_tab_view_get_n_pages(tm->priv->tab_view);
-        g_debug("Searching through %d pages for matching tab document", n_pages);
-
-        for (gint i = 0; i < n_pages; i++) {
-            AdwTabPage *p = adw_tab_view_get_nth_page(tm->priv->tab_view, i);
-            TabDocument *td = g_object_get_data(G_OBJECT(p), "tab_document");
-            if (td == tab_doc) {
-                page = p;
-                g_debug("Found matching tab page at index %d", i);
-                break;
-            }
-        }
-
-        if (page) {
+        if (ctx->page) {
             g_debug("Updating tab title for loaded file");
             /* Update tab title from loaded file */
-            tab_manager_update_tab_title(tm, page);
+            tab_manager_update_tab_title(ctx->tm, ctx->page);
             g_debug("Tab title updated successfully");
-        } else {
-            g_debug("Warning: Could not find tab page for loaded TabDocument");
         }
 
-        g_debug("About to finalize DocumentManager initialization");
-        /* Finalize DocumentManager initialization to enable change detection */
-        DocumentManager *dm = tab_document_get_document_manager(tab_doc);
-        if (dm) {
-            g_debug("Calling document_manager_finalize_initialization");
-            document_manager_finalize_initialization(dm);
-            g_debug("DocumentManager initialization finalized");
+        g_debug("About to handle markdown/DocumentManager finalization");
+
+        /* For markdown files, DocumentManager initialization will be finalized
+         * after deferred rendering is complete. For non-markdown files, finalize now. */
+        const gchar *file_path = document_manager_get_file_path(
+            tab_document_get_document_manager(ctx->tab_doc));
+
+        if (!file_path || !g_str_has_suffix(file_path, ".md")) {
+            DocumentManager *dm = tab_document_get_document_manager(ctx->tab_doc);
+            if (dm) {
+                document_manager_finalize_initialization(dm);
+                g_debug("Finalized DocumentManager for non-markdown file");
+            }
         } else {
-            g_debug("Warning: Could not get DocumentManager for TabDocument");
+            g_debug("Markdown file loaded - DocumentManager will be finalized after deferred rendering");
         }
 
-        g_debug("About to switch to WYSIWYG view");
-        /* Trigger markdown rendering by switching to WYSIWYG mode */
-        tab_document_switch_to_wysiwyg_view(tab_doc);
-        g_debug("Switched to WYSIWYG view successfully");
+        g_debug("Async file load completed successfully");
 
     } else {
         g_warning("Failed to load file in tab: %s", error ? error->message : "Unknown error");
         g_clear_error(&error);
-
-        /* Could show error to user here or handle gracefully */
     }
+
+    /* Clean up context */
+    g_free(ctx);
 }
 
 /* Global accessor implementation */

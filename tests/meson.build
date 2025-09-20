@@ -11,18 +11,33 @@ endif
 lib_sources = [
   '../src/render/markdown/cmrender.c',
   '../src/render/markdown/tag_manager.c',
+  '../src/render/markdown/markdown_engine.c',
   '../src/render/visual/theme_styles.c',
   '../src/render/visual/hr_widget.c',
+  '../src/render/safe_helpers.c',
+  '../src/render/images/image-widget.c',
+  '../src/render/images/http_images.c',
   '../src/components/toolbar/toolbar.c',
   '../src/core/settings.c',
+  '../src/core/settings_manager.c',
+  '../src/core/signal_manager.c',
   '../src/core/util.c',
+  '../src/core/app_initialization.c',
+  '../src/core/window_size_manager.c',
+  '../src/core/window_lifecycle.c',
   '../src/document/document.c',
   '../src/document/document_manager.c',
-  '../src/render/images/image-widget.c',
   '../src/ui/actions/file_actions.c',
   '../src/ui/actions/app_actions.c',
   '../src/ui/dialogs/dialogs.c',
   '../src/ui/image_embedder.c',
+  '../src/ui/tab_document.c',
+  '../src/ui/tab_manager.c',
+  '../src/ui/tab_integration.c',
+  '../src/ui/status_manager.c',
+  '../src/ui/event_handlers.c',
+  '../src/ui/text_view_interactions.c',
+  '../src/editor/buffer_manager.c',
 ]
 
 # Build a static library for testing (excludes main.c)
@@ -35,7 +50,8 @@ gtktext_lib = static_library('gtktext_test',
 
 # Test sources
 test_sources = [
-  'test_lists.c'
+  'test_lists.c',
+  'test_async_document.c'
 ]
 
 # Set up test environment with GSettings schema directory

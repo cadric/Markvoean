@@ -17,7 +17,7 @@ G_BEGIN_DECLS
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 /* Forward declarations */
-typedef struct _DocumentManager DocumentManager;
+#include <gtktext/document/document_manager.h>
 
 /* Opaque handle - internals hidden from users */
 typedef struct _TabDocument TabDocument;
@@ -46,7 +46,17 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
  * FILE OPERATIONS - Loading and saving
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
+/* Synchronous file loading - will be deprecated */
 gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError **error);
+
+/* Asynchronous file loading - preferred API */
+void tab_document_load_file_async(TabDocument *td,
+                                  const char *file_path,
+                                  GCancellable *cancellable,
+                                  GAsyncReadyCallback callback,
+                                  gpointer user_data);
+gboolean tab_document_load_file_finish(TabDocument *td, GAsyncResult *result, GError **error);
+
 gboolean tab_document_save(TabDocument *td, GError **error);
 
 /* Note: Current save_as returns TRUE when async save *starts*, not when it completes */

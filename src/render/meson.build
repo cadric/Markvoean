@@ -22,5 +22,10 @@ render_sources += files(
   'visual/hr_widget.c'
 )
 
+# Safe rendering helpers - Phase 2 enhancement
+render_sources += files(
+  'safe_helpers.c'
+)
+
 # Export sources for parent build
 render_lib_sources = render_sources

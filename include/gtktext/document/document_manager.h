@@ -14,6 +14,22 @@
 G_BEGIN_DECLS
 
 /* ═══════════════════════════════════════════════════════════════════════════════
+ * ERROR DOMAIN - DocumentManager error types and domain
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+#define GTKTEXT_DOCUMENT_ERROR (gtktext_document_error_quark())
+
+typedef enum {
+    GTKTEXT_DOCUMENT_ERROR_NOT_FOUND,    /* File does not exist */
+    GTKTEXT_DOCUMENT_ERROR_READONLY,     /* File or directory is read-only */
+    GTKTEXT_DOCUMENT_ERROR_CONFLICT,     /* External modification conflict */
+    GTKTEXT_DOCUMENT_ERROR_IO,           /* I/O operation failed */
+    GTKTEXT_DOCUMENT_ERROR_CANCELLED     /* Operation was cancelled */
+} GtktextDocumentError;
+
+GQuark gtktext_document_error_quark(void);
+
+/* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Type definitions and enums
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
@@ -35,8 +51,12 @@ typedef enum {
     SAVE_RESULT_CONFLICT     /* External modification conflict */
 } SaveResult;
 
-/* Forward declaration - full definition in .c file */
-typedef struct _DocumentManager DocumentManager;
+/* GObject type declarations */
+#define GTKTEXT_TYPE_DOCUMENT_MANAGER (gtktext_document_manager_get_type())
+G_DECLARE_FINAL_TYPE(GtktextDocumentManager, gtktext_document_manager, GTKTEXT, DOCUMENT_MANAGER, GObject)
+
+/* Convenience typedef for API compatibility */
+typedef GtktextDocumentManager DocumentManager;
 
 /* Callback types */
 typedef void (*SaveCompleteCallback)(DocumentManager *dm, SaveResult result, 
@@ -52,10 +72,37 @@ typedef void (*StateChangeCallback)(DocumentManager *dm, DocumentState old_state
 DocumentManager* document_manager_new(GtkTextBuffer *buffer, GtkWindow *window);
 void document_manager_free(DocumentManager *dm);
 
-/* Document operations */
+/* Document operations - Async APIs (preferred) */
+void document_manager_open_async(DocumentManager *dm, const gchar *file_path,
+                                GCancellable *cancellable, GAsyncReadyCallback callback,
+                                gpointer user_data);
+gboolean document_manager_open_finish(DocumentManager *dm, GAsyncResult *result,
+                                     GError **error);
+
+void document_manager_save_async(DocumentManager *dm, GCancellable *cancellable,
+                                GAsyncReadyCallback callback, gpointer user_data);
+gboolean document_manager_save_finish(DocumentManager *dm, GAsyncResult *result,
+                                     GError **error);
+
+void document_manager_save_as_async(DocumentManager *dm, const gchar *file_path,
+                                   GCancellable *cancellable, GAsyncReadyCallback callback,
+                                   gpointer user_data);
+gboolean document_manager_save_as_finish(DocumentManager *dm, GAsyncResult *result,
+                                        GError **error);
+
+/* Document operations - Legacy sync APIs (deprecated) */
+G_GNUC_DEPRECATED_FOR(document_manager_open_async)
 gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
                                    GError **error);
-/* Adopt current buffer for a given file path without re-reading from disk */
+
+G_GNUC_DEPRECATED_FOR(document_manager_save_async)
+gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog,
+                              SaveCompleteCallback callback, gpointer user_data);
+G_GNUC_DEPRECATED_FOR(document_manager_save_as_async)
+gboolean document_manager_save_as(DocumentManager *dm, const gchar *file_path,
+                                 SaveCompleteCallback callback, gpointer user_data);
+
+/* Internal/special use APIs */
 gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar *file_path,
                                                GError **error);
 
@@ -63,16 +110,15 @@ gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar 
 G_GNUC_DEPRECATED_FOR(document_manager_adopt_current_buffer)
 gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
                                                 const gchar *content, GError **error);
-gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog, 
-                              SaveCompleteCallback callback, gpointer user_data);
-gboolean document_manager_save_as(DocumentManager *dm, const gchar *file_path,
-                                 SaveCompleteCallback callback, gpointer user_data);
 void document_manager_start_autosave(DocumentManager *dm);
 void document_manager_stop_autosave(DocumentManager *dm);
 void document_manager_update_autosave_setting(DocumentManager *dm);
 
 /* State management */
 DocumentState document_manager_get_state(DocumentManager *dm);
+
+/* Deprecated: Use g_signal_connect(dm, "state-changed", callback, user_data) instead */
+G_GNUC_DEPRECATED_FOR(g_signal_connect)
 void document_manager_set_state_callback(DocumentManager *dm,
                                         StateChangeCallback callback,
                                         gpointer user_data);

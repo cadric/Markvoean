@@ -9,6 +9,7 @@
 #define GTKTEXT_UI_STATUS_MANAGER_H
 
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gtktext/document/document_manager.h>
 
 G_BEGIN_DECLS
@@ -49,6 +50,32 @@ void status_manager_update_status_bar_for_state(GtkApplication *app, DocumentSta
 void gtktext_update_status_bar_for_document_state(GtkApplication *app,
                                                    DocumentState state,
                                                    const gchar *file_path);
+
+/**
+ * Show a toast notification in the active window
+ * @param app Application instance
+ * @param message Toast message to display
+ * @param timeout_seconds Timeout in seconds (0 for default)
+ */
+void status_manager_show_toast(GtkApplication *app, const gchar *message, int timeout_seconds);
+
+/**
+ * Show a loading toast for async operations
+ * @param app Application instance
+ * @param message Loading message to display
+ * @return Toast widget that can be dismissed later
+ */
+AdwToast* status_manager_show_loading_toast(GtkApplication *app, const gchar *message);
+
+/**
+ * Update status for async file operations
+ * @param app Application instance
+ * @param operation_type Type of operation ("Opening", "Saving", etc.)
+ * @param file_path File path being operated on
+ * @param is_loading Whether operation is in progress
+ */
+void status_manager_update_async_operation(GtkApplication *app, const gchar *operation_type,
+                                          const gchar *file_path, gboolean is_loading);
 
 G_END_DECLS
 
