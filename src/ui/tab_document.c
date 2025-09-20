@@ -142,6 +142,27 @@ static void on_document_manager_state_changed(DocumentManager *dm, DocumentState
     TabDocument *td = user_data;
     g_return_if_fail(td != NULL);
 
+    /* Sync TabDocument file path and title with DocumentManager */
+    const gchar *dm_file_path = document_manager_get_file_path(dm);
+    if (dm_file_path && (!td->file_path || g_strcmp0(td->file_path, dm_file_path) != 0)) {
+        /* Update TabDocument file path to match DocumentManager */
+        g_free(td->file_path);
+        td->file_path = g_strdup(dm_file_path);
+
+        /* Update display title based on file path */
+        g_free(td->tab_title);
+        if (dm_file_path) {
+            gchar *basename = g_path_get_basename(dm_file_path);
+            td->tab_title = basename;
+        } else {
+            td->tab_title = g_strdup("Untitled");
+        }
+
+        g_debug("TabDocument synced with DocumentManager: file_path=%s, title=%s",
+                td->file_path ? td->file_path : "(null)",
+                td->tab_title ? td->tab_title : "(null)");
+    }
+
     /* Get dirty state from DocumentManager (single source of truth) */
     gboolean new_dirty = (new_state == DOC_STATE_DIRTY || new_state == DOC_STATE_DRAFT);
     gboolean was_dirty = (old_state == DOC_STATE_DIRTY || old_state == DOC_STATE_DRAFT);
@@ -309,12 +330,9 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
 
         /* If this tab has a file path, tell the DocumentManager about it */
         if (td->file_path) {
-            /* Block DocumentManager signals during file setup to prevent false dirty state */
-            document_manager_block_buffer_signals(td->doc_manager);
-            g_debug("BLOCKED DocumentManager signals for file setup: %s", td->file_path);
-
             GError *error = NULL;
             /* Adopt existing buffer/content without re-reading from disk */
+            /* DocumentManager now handles signal blocking internally */
             if (!document_manager_adopt_current_buffer(td->doc_manager, td->file_path, &error)) {
                 g_warning("Failed to tell DocumentManager about file path %s: %s",
                          td->file_path, error ? error->message : "Unknown error");
@@ -322,10 +340,6 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
             } else {
                 g_debug("DocumentManager now knows about file: %s", td->file_path);
             }
-
-            /* Unblock signals after file setup */
-            document_manager_unblock_buffer_signals(td->doc_manager);
-            g_debug("UNBLOCKED DocumentManager signals after file setup: %s", td->file_path);
 
             /* Finalize initialization for non-markdown files (markdown files will be finalized after deferred rendering) */
             if (!td->file_path || !g_str_has_suffix(td->file_path, ".md")) {
@@ -346,8 +360,9 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
             DocumentState current_state = document_manager_get_state(td->doc_manager);
             g_debug("DocumentManager final state before callback setup: %d", current_state);
 
-            document_manager_set_state_callback(td->doc_manager, on_document_manager_state_changed, td);
-            g_debug("Set up state change callback for TabDocument DocumentManager");
+            g_signal_connect(td->doc_manager, "state-changed",
+                            G_CALLBACK(on_document_manager_state_changed), td);
+            g_debug("Connected to state-changed signal for TabDocument DocumentManager");
 
             /* Immediately update status bar with the correct current state */
             const gchar *file_path = document_manager_get_file_path(td->doc_manager);
@@ -542,37 +557,35 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
     g_return_val_if_fail(file_path != NULL, FALSE);
     g_return_val_if_fail(!td->is_welcome, FALSE);
 
-    /* Load file contents */
-    g_autofree char *contents = NULL;
-    gsize length = 0;
-    if (!g_file_get_contents(file_path, &contents, &length, error)) {
+    /* DocumentManager is required for file loading */
+    if (!td->doc_manager) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                   "DocumentManager is required for file operations");
         return FALSE;
     }
 
-    /* Block buffer changed signal during load */
-    if (td->doc_manager) {
-        document_manager_block_buffer_signals(td->doc_manager);
-        g_debug("Blocked DocumentManager buffer signals during file load");
+    /* DocumentManager handles file loading and buffer management */
+    if (!document_manager_open_file(td->doc_manager, file_path, error)) {
+        return FALSE;
     }
+    g_debug("DocumentManager loaded file: %s", file_path);
 
-    /* Suppress markdown engine reparse during entire file loading process for markdown files */
+    /* Handle markdown rendering for both DocumentManager and fallback cases */
     if (g_str_has_suffix(file_path, ".md")) {
         g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
         g_debug("LOAD: Suppressed markdown reparse for entire file loading process");
-    }
 
-    /* Set content in buffer */
-    gtk_text_buffer_set_text(td->buffer, contents, -1);
-
-    /* Render markdown if applicable - defer until text view is realized */
-    if (g_str_has_suffix(file_path, ".md")) {
+        /* Get buffer content for markdown rendering */
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(td->buffer, &start, &end);
+        g_autofree char *buffer_contents = gtk_text_buffer_get_text(td->buffer, &start, &end, FALSE);
 
         /* Store original content for later rendering */
         g_free(td->pending_markdown_content);
-        td->pending_markdown_content = g_strdup(contents);
+        td->pending_markdown_content = g_strdup(buffer_contents);
 
         /* Try to render immediately, but also set up deferred rendering */
-        cm_render_markdown_to_buffer(td->buffer, contents,
+        cm_render_markdown_to_buffer(td->buffer, buffer_contents,
                                     GTK_TEXT_VIEW(td->text_view), NULL);
 
         /* Restore suppression flag as cmrender clears it internally */
@@ -586,12 +599,6 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
         }
 
         /* Note: suppression flag will be cleared by the deferred rendering callback */
-    }
-
-    /* Unblock signal */
-    if (td->doc_manager) {
-        document_manager_unblock_buffer_signals(td->doc_manager);
-        g_debug("Unblocked DocumentManager buffer signals after file load");
     }
 
     /* Update document metadata */
@@ -611,6 +618,71 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
 
     g_debug("Loaded file: %s", file_path);
     return TRUE;
+}
+
+void tab_document_load_file_async(TabDocument *td,
+                                  const char *file_path,
+                                  GCancellable *cancellable,
+                                  GAsyncReadyCallback callback,
+                                  gpointer user_data)
+{
+    g_return_if_fail(td != NULL);
+    g_return_if_fail(file_path != NULL);
+    g_return_if_fail(!td->is_welcome);
+
+    /* DocumentManager is required for async file loading */
+    if (!td->doc_manager) {
+        GTask *task = g_task_new(td, cancellable, callback, user_data);
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                               "DocumentManager is required for file operations");
+        g_object_unref(task);
+        return;
+    }
+
+    /* Delegate to DocumentManager's async open implementation */
+    document_manager_open_async(td->doc_manager, file_path, cancellable, callback, user_data);
+}
+
+gboolean tab_document_load_file_finish(TabDocument *td, GAsyncResult *result, GError **error)
+{
+    g_return_val_if_fail(td != NULL, FALSE);
+    g_return_val_if_fail(G_IS_ASYNC_RESULT(result), FALSE);
+
+    /* DocumentManager is required */
+    if (!td->doc_manager) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                   "DocumentManager is required for file operations");
+        return FALSE;
+    }
+
+    /* Handle DocumentManager async result */
+    gboolean ok = document_manager_open_finish(td->doc_manager, result, error);
+    if (ok) {
+        /* Update TabDocument metadata after successful load */
+        const gchar *loaded_path = document_manager_get_file_path(td->doc_manager);
+        if (loaded_path) {
+            g_free(td->file_path);
+            td->file_path = g_strdup(loaded_path);
+
+            g_free(td->tab_title);
+            g_autofree char *basename = g_path_get_basename(td->file_path);
+            td->tab_title = g_steal_pointer(&basename);
+
+            /* Handle markdown rendering for loaded content */
+            if (g_str_has_suffix(loaded_path, ".md")) {
+                GtkTextIter start, end;
+                gtk_text_buffer_get_bounds(td->buffer, &start, &end);
+                g_autofree char *buffer_contents = gtk_text_buffer_get_text(td->buffer, &start, &end, FALSE);
+
+                g_free(td->pending_markdown_content);
+                td->pending_markdown_content = g_strdup(buffer_contents);
+
+                cm_render_markdown_to_buffer(td->buffer, buffer_contents,
+                                            GTK_TEXT_VIEW(td->text_view), NULL);
+            }
+        }
+    }
+    return ok;
 }
 
 gboolean tab_document_save(TabDocument *td, GError **error)
@@ -641,8 +713,8 @@ gboolean tab_document_save_as(TabDocument *td, const char *file_path, GError **e
 
     /* Use DocumentManager to handle the save operation */
     if (td->doc_manager) {
-        /* DocumentManager handles the save operation and state management */
-        /* TODO: DocumentManager uses async API - need to refactor for proper error propagation */
+        /* Note: DocumentManager now uses async API. This sync wrapper is deprecated. */
+        /* For now, call the deprecated sync API to maintain compatibility */
         if (!document_manager_save_as(td->doc_manager, safe_file_path, NULL, NULL)) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "DocumentManager failed to save file: %s", safe_file_path);
@@ -736,48 +808,82 @@ void tab_document_save_as_async(TabDocument *td,
     g_return_if_fail(td != NULL);
     g_return_if_fail(file_path != NULL);
 
-    /* Capture current buffer content on main thread */
-    g_autofree char *content = cm_render_buffer_to_markdown(td->buffer);
-    if (!content) {
+    /* Use DocumentManager async API for unified I/O handling */
+    if (td->doc_manager) {
+        /* Delegate to DocumentManager's async save_as implementation */
+        document_manager_save_as_async(td->doc_manager, file_path, cancellable, callback, user_data);
+    } else {
+        /* Fallback for case without DocumentManager (should be rare) */
+        g_autofree char *content = cm_render_buffer_to_markdown(td->buffer);
+        if (!content) {
+            GTask *task = g_task_new(td, cancellable, callback, user_data);
+            g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to retrieve buffer content");
+            g_object_unref(task);
+            return;
+        }
+
+        SaveTaskData *data = g_new0(SaveTaskData, 1);
+        data->path = g_strdup(file_path);
+        data->content = g_strdup(content);
+
         GTask *task = g_task_new(td, cancellable, callback, user_data);
-        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to retrieve buffer content");
+        g_task_set_task_data(task, data, (GDestroyNotify)save_task_data_free);
+
+        g_task_run_in_thread(task, save_as_task_thread);
         g_object_unref(task);
-        return;
     }
-
-    SaveTaskData *data = g_new0(SaveTaskData, 1);
-    data->path = g_strdup(file_path);
-    data->content = g_strdup(content);
-
-    GTask *task = g_task_new(td, cancellable, callback, user_data);
-    g_task_set_task_data(task, data, (GDestroyNotify)save_task_data_free);
-
-    g_task_run_in_thread(task, save_as_task_thread);
-    g_object_unref(task);
 }
 
 gboolean tab_document_save_as_finish(TabDocument *td, GAsyncResult *result, GError **error)
 {
     g_return_val_if_fail(td != NULL, FALSE);
-    g_return_val_if_fail(G_IS_TASK(result), FALSE);
+    g_return_val_if_fail(G_IS_ASYNC_RESULT(result), FALSE);
 
-    gboolean ok = g_task_propagate_boolean(G_TASK(result), error);
-    if (!ok) return FALSE;
+    gboolean ok;
 
-    /* On success, adopt current buffer for path and update TabDocument metadata */
-    SaveTaskData *data = (SaveTaskData *)g_task_get_task_data(G_TASK(result));
-    if (data && td->doc_manager) {
-        document_manager_adopt_current_buffer(td->doc_manager, data->path, NULL);
+    /* Handle DocumentManager async result */
+    if (td->doc_manager) {
+        ok = document_manager_save_as_finish(td->doc_manager, result, error);
+        /* DocumentManager handles the file path adoption internally */
+    } else {
+        /* Handle fallback GTask result */
+        g_return_val_if_fail(G_IS_TASK(result), FALSE);
+        ok = g_task_propagate_boolean(G_TASK(result), error);
+
+        if (ok) {
+            /* For fallback case, adopt current buffer for path */
+            SaveTaskData *data = (SaveTaskData *)g_task_get_task_data(G_TASK(result));
+            if (data && td->doc_manager) {
+                document_manager_adopt_current_buffer(td->doc_manager, data->path, NULL);
+            }
+        }
     }
 
-    /* Update TabDocument metadata */
-    if (data) {
-        g_free(td->file_path);
-        td->file_path = g_strdup(data->path);
+    if (!ok) return FALSE;
 
-        g_free(td->tab_title);
-        g_autofree char *basename = g_path_get_basename(td->file_path);
-        td->tab_title = g_steal_pointer(&basename);
+    /* Update TabDocument metadata */
+    if (td->doc_manager) {
+        /* DocumentManager case - get path from DocumentManager */
+        const gchar *saved_path = document_manager_get_file_path(td->doc_manager);
+        if (saved_path) {
+            g_free(td->file_path);
+            td->file_path = g_strdup(saved_path);
+
+            g_free(td->tab_title);
+            g_autofree char *basename = g_path_get_basename(td->file_path);
+            td->tab_title = g_steal_pointer(&basename);
+        }
+    } else {
+        /* Fallback case - get path from task data */
+        SaveTaskData *data = (SaveTaskData *)g_task_get_task_data(G_TASK(result));
+        if (data) {
+            g_free(td->file_path);
+            td->file_path = g_strdup(data->path);
+
+            g_free(td->tab_title);
+            g_autofree char *basename = g_path_get_basename(td->file_path);
+            td->tab_title = g_steal_pointer(&basename);
+        }
     }
 
     /* Mark as clean via standard API (also triggers callbacks) */

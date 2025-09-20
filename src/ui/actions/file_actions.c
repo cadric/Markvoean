@@ -18,6 +18,7 @@
 #include <gtktext/document/document_manager.h>
 #include <gtktext/core/settings.h>
 #include <gtktext/render/cmrender.h>
+#include <gtktext/ui/status_manager.h>
 #include <gtktext/ui/tab_manager.h>
 #include <gtktext/ui/tab_integration.h>
 #include <gtktext/ui/tab_document.h>
@@ -26,6 +27,13 @@
 #include <libsoup/soup.h>
 #endif
 
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * FORWARD DECLARATIONS - Async callback functions
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+static void file_action_on_open_complete(GObject *source_object, GAsyncResult *result, gpointer user_data);
+static void file_action_on_save_complete(GObject *source_object, GAsyncResult *result, gpointer user_data);
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HELPERS - Utility functions for file operations
@@ -167,16 +175,8 @@ gboolean file_action_handle_open_dialog_result(GFile *file, GtkApplication *app,
         }
     }
 
-    /* Load file content */
-    g_autofree char *contents = NULL;
-    gsize len = 0;
-    if (!g_file_get_contents(path, &contents, &len, error)) {
-        g_warning("Open failed: %s", (*error) ? (*error)->message : "unknown error");
-        return FALSE;
-    }
-
     if (open_in_new_tab) {
-        /* Open in new tab via TabManager */
+        /* Open in new tab via TabManager - use async load */
         TabManager *tm = gtktext_get_tab_manager(app);
         if (!tm) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "TabManager not found");
@@ -189,23 +189,24 @@ gboolean file_action_handle_open_dialog_result(GFile *file, GtkApplication *app,
             return FALSE;
         }
 
-        /* Load file content into the new tab */
+        /* Load file content using async API */
         TabDocument *tab_doc = tab_manager_get_tab_document(tm, page);
         if (tab_doc) {
-            tab_document_load_file(tab_doc, path, error);
+            tab_document_load_file_async(tab_doc, path, NULL, NULL, NULL);
         }
     } else {
-        /* Open in current document via DocumentManager */
+        /* Open in current document via DocumentManager async API */
         DocumentManager *dm = g_object_get_data(G_OBJECT(app), "doc_manager");
         if (!dm) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "DocumentManager not found");
             return FALSE;
         }
 
-        /* Adopt current buffer & file path to avoid double file reading */
-        if (!document_manager_adopt_current_buffer(dm, path, error)) {
-            return FALSE;
-        }
+        /* Show loading feedback */
+        status_manager_update_async_operation(GTK_APPLICATION(app), "Opening", path, TRUE);
+
+        /* Use async open with completion callback */
+        document_manager_open_async(dm, path, NULL, file_action_on_open_complete, app);
     }
 
     return TRUE;
@@ -320,10 +321,62 @@ void file_action_on_save_as_dialog_finish(GObject *source_object, GAsyncResult *
 
     g_autofree char *path = g_file_get_path(file);
 
-    /* Use save_as to save to the new location */
-    document_manager_save_as(dm, path, NULL, app);
+    /* Use async save_as to save to the new location */
+    /* Show loading feedback */
+    status_manager_update_async_operation(GTK_APPLICATION(app), "Saving", path, TRUE);
+
+    /* Use async save with completion callback */
+    document_manager_save_as_async(dm, path, NULL, file_action_on_save_complete, app);
 
     g_message("Document save-as initiated for: %s", path);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * ASYNC COMPLETION CALLBACKS - Handles async operation feedback
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+static void file_action_on_open_complete(GObject *source_object, GAsyncResult *result, gpointer user_data)
+{
+    DocumentManager *dm = GTKTEXT_DOCUMENT_MANAGER(source_object);
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GError *error = NULL;
+
+    gboolean success = document_manager_open_finish(dm, result, &error);
+    const gchar *file_path = document_manager_get_file_path(dm);
+
+    if (success) {
+        status_manager_update_async_operation(app, "Opening", file_path, FALSE);
+        g_debug("File opened successfully: %s", file_path ? file_path : "(null)");
+    } else {
+        status_manager_update_async_operation(app, "Opening", NULL, FALSE);
+        g_autofree gchar *error_msg = g_strdup_printf("Failed to open file: %s",
+                                                     error ? error->message : "Unknown error");
+        status_manager_show_toast(app, error_msg, 5);
+        g_debug("File open failed: %s", error ? error->message : "Unknown error");
+        g_clear_error(&error);
+    }
+}
+
+static void file_action_on_save_complete(GObject *source_object, GAsyncResult *result, gpointer user_data)
+{
+    DocumentManager *dm = GTKTEXT_DOCUMENT_MANAGER(source_object);
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GError *error = NULL;
+
+    gboolean success = document_manager_save_as_finish(dm, result, &error);
+    const gchar *file_path = document_manager_get_file_path(dm);
+
+    if (success) {
+        status_manager_update_async_operation(app, "Saving", file_path, FALSE);
+        g_debug("File saved successfully: %s", file_path ? file_path : "(null)");
+    } else {
+        status_manager_update_async_operation(app, "Saving", NULL, FALSE);
+        g_autofree gchar *error_msg = g_strdup_printf("Failed to save file: %s",
+                                                     error ? error->message : "Unknown error");
+        status_manager_show_toast(app, error_msg, 5);
+        g_debug("File save failed: %s", error ? error->message : "Unknown error");
+        g_clear_error(&error);
+    }
 }
 
 /* Tab-aware save dialog completion callback */
