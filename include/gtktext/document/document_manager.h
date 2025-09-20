@@ -126,15 +126,25 @@ gboolean document_manager_save_draft(DocumentManager *dm, GError **error);
 gboolean document_manager_discard_current_draft(DocumentManager *dm);
 gchar** document_manager_list_drafts(void);
 gchar* document_manager_get_draft_display_name(const gchar *draft_path);
-gboolean document_manager_open_draft(DocumentManager *dm, const gchar *draft_path, 
+gboolean document_manager_open_draft(DocumentManager *dm, const gchar *draft_path,
                                     GError **error);
 gboolean document_manager_remove_draft(const gchar *draft_path, GError **error);
 gchar** document_manager_list_recovery_files(void);
+gchar** document_manager_list_recovery_files_for_document(const gchar *file_path);
 gchar* document_manager_get_recovery_display_name(const gchar *recovery_path);
-gboolean document_manager_recover_from_file(DocumentManager *dm, 
-                                           const gchar *recovery_path, 
+gboolean document_manager_recover_from_file(DocumentManager *dm,
+                                           const gchar *recovery_path,
                                            GError **error);
 void document_manager_cleanup_recovery(const gchar *recovery_path);
+
+/* Version history */
+gboolean document_manager_save_version_history(DocumentManager *dm, GError **error);
+gchar** document_manager_list_version_history(const gchar *file_path);
+gchar* document_manager_get_version_display_name(const gchar *version_path);
+gboolean document_manager_restore_from_version(DocumentManager *dm,
+                                              const gchar *version_path,
+                                              GError **error);
+void document_manager_cleanup_old_versions(const gchar *file_path);
 
 /* External change handling */
 void document_manager_check_external_changes(DocumentManager *dm);

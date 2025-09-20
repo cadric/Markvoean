@@ -17,6 +17,174 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [2.5.6] - 2025-09-20
+
+### Fixed
+- Ctrl+Q quit action now properly checks for unsaved changes and shows save dialog
+- Quit behavior now matches window close behavior for consistent user experience
+
+## [2.5.5] - 2025-09-20
+
+### Added
+- Ctrl+Y as alternative redo shortcut (in addition to Ctrl+Shift+Z)
+- Ctrl+Q to quit application
+- Ctrl+N as alternative new document shortcut (in addition to Ctrl+T)
+- F1 to show keyboard shortcuts (in addition to Ctrl+?)
+- Updated shortcuts window to display all new keyboard shortcuts
+
+### Improved
+- Better keyboard shortcut coverage for common GNOME/cross-platform conventions
+- Dual shortcut support for key actions (redo and new document)
+
+## [2.5.4] - 2025-09-20
+
+### Fixed
+- Test failure in test_async_document caused by fatal file deletion warning
+- Changed external file deletion from g_warning() to g_message() to prevent SIGTRAP in test environment
+
+## [2.5.3] - 2025-09-20
+
+### Improved
+- Close dialog button text changed from "Close without Saving" to "Don't Save" for better HIG compliance
+- More concise and standard button labeling in unsaved changes dialogs
+
+## [2.5.2] - 2025-09-20
+
+### Added
+- Version history preferences in settings dialog
+- Enable/disable version history toggle switch
+- Maximum versions count spinner (1-50 range)
+- Proper UI integration with sensitivity controls
+
+### Fixed
+- Version history now properly respects user preferences
+- Settings are disabled by default until user enables them
+- Clear indication when version history is disabled
+
+## [2.5.1] - 2025-09-20
+
+**PATCH RELEASE: Version History UI Integration**
+
+### Added
+- **Version History Menu Item**: Accessible via application menu for easy discovery
+- **Smart Version History Dialog**: Shows proper version files (not recovery files)
+- **Informative Dialogs**: Clear messages for disabled version history, unsaved documents, and no versions
+- **Version Restoration**: Full restore functionality with proper error handling
+- **Version Management**: Ability to remove old versions from the UI
+
+### Enhanced
+- **Better User Experience**: Version history only appears when meaningful
+- **Clear Labeling**: Version files properly labeled as "Version" vs "Recovery" vs "Draft"
+- **Document Context**: Version history is always document-specific
+- **Error Handling**: Graceful handling of all edge cases
+
+### Technical Implementation
+- Re-added `app.version-history` action with proper implementation
+- Enhanced `dialogs_show_document_version_history()` to use version files
+- Added version restore functionality via `document_manager_restore_from_version()`
+- Smart dialog detection for enabled/disabled states and available versions
+
+## [2.5.0] - 2025-09-20
+
+**MINOR RELEASE: True Version History System**
+
+### Added
+- **Version History System**: Complete version history that saves previous document versions on each successful save
+- **User Preferences**: Version history can be enabled/disabled in preferences (default: disabled)
+- **Configurable Limits**: Maximum number of versions to keep per document (default: 10, range: 1-50)
+- **Automatic Cleanup**: Old versions are automatically removed when limit is exceeded
+- **Proper Storage**: Version files stored in user cache directory, separate from crash recovery
+
+### Changed
+- **Recovery vs Version History**: Clear separation between crash recovery and intentional version history
+- **Menu Structure**: Removed confusing "Version History" menu item (recovery should be automatic popup)
+- **User Experience**: Version history now works as expected - saves actual document versions, not just crash recovery
+
+### Technical Implementation
+- Added `version-history-enabled` and `version-history-max-versions` GSettings keys
+- Created complete version history API in DocumentManager
+- Integrated version saving into successful save operations
+- Version files use `.version` extension and contain metadata + content
+- Recovery files (`.recovery`) remain separate for crash protection
+
+## [2.4.1] - 2025-09-20
+
+**PATCH RELEASE: Version History Fixes and Document-Specific Filtering**
+
+### Fixed
+- **Version history crash**: Fixed critical crash when opening version history (GTK_IS_WIDGET assertion failure)
+- **Memory corruption**: Resolved SIGABRT crash caused by NULL callback in recovery browser
+- **Document-specific filtering**: Version history now only shows recovery files for the current document
+
+### Added
+- **Document-specific version history**: New `dialogs_show_document_version_history()` function
+- **Recovery file filtering**: `document_manager_list_recovery_files_for_document()` for targeted recovery
+- **Improved UX**: Version history dialog shows document name and uses "Restore" instead of "Open"
+
+### Technical Implementation
+- Added proper callback function `on_version_history_action()` instead of passing NULL
+- Created filtering logic based on document basename and recovery file metadata
+- Implemented untitled document handling with informative debug messages
+- Updated dialog titles and button labels for better clarity
+
+## [2.4.0] - 2025-09-20
+
+**MINOR RELEASE: Complete Undo/Redo Functionality**
+
+### Added
+- **Undo/Redo actions**: Full GTK4 native undo/redo support for both WYSIWYG and Source editing modes
+- **Keyboard shortcuts**: Standard Ctrl+Z (undo) and Ctrl+Shift+Z (redo) functionality
+- **Smart buffer detection**: Undo/redo automatically works with the currently active editing buffer
+- **GTK4 integration**: Uses built-in `gtk_text_buffer_undo()` and `gtk_text_buffer_redo()` functions
+
+### Technical Implementation
+- Created `edit_actions.c` module with proper action callbacks
+- Enabled undo functionality on both text buffers with `gtk_text_buffer_set_enable_undo()`
+- Added action entries to main application action map
+- Implemented robust tab manager lookup using `gtktext_get_tab_manager()`
+- Added proper error handling and graceful fallbacks
+
+### Fixed
+- **Missing undo functionality**: Previously non-functional undo/redo now works correctly
+- **Tab manager lookup**: Fixed "No tab manager found" warnings during action execution
+
+## [2.3.0] - 2025-09-20
+
+**MINOR RELEASE: Integrated Hash-Based State Management**
+
+### Changed
+- **DocumentManager integration**: Fully replaced complex state machine with hash-based doc_state system
+- **Simplified status display**: Status bar now shows clear "Saved" vs "Unsaved changes" based on content hash
+- **Eliminated state bugs**: No more view-switching state confusion or dirty tracking inconsistencies
+
+### Technical Implementation
+- DocumentManager uses DocState internally, maintains backward API compatibility
+- TabDocument automatically benefits from improved state accuracy
+- Status manager simplified to focus on core clean/dirty states
+- All existing UI components work seamlessly with new system
+
+### Removed Complexity
+- Complex DocumentState enum state machine (simplified to clean/dirty)
+- Redundant state tracking code paths
+- View-dependent state inconsistencies
+
+## [2.2.0] - 2025-09-20
+
+**MINOR RELEASE: Clean Document State Management**
+
+### Added
+- **Hash-based state tracking**: New `doc_state` module provides deterministic clean/dirty state management
+- **Single source of truth**: Uses FNV-1a content hashing to eliminate state tracking bugs
+- **View-agnostic design**: WYSIWYG ↔ Source view switches don't affect document state
+- **Comprehensive tests**: Full unit test suite covering all state transition scenarios
+- **Integration documentation**: Complete guide for migrating from complex state management
+
+### Technical Details
+- `doc_state.h/c`: Clean API with intent-based function calls (`doc_mark_loaded_or_new`, `doc_on_user_mutation`, `doc_on_saved`)
+- Canonical content hashing ensures identical state for logically equivalent content
+- Defensive programming with parameter validation and error logging
+- Performance optimized with fast FNV-1a hashing algorithm
+
 ## [2.1.2] - 2025-09-20
 
 **PATCH RELEASE: Enhanced Copy with Formatting Preservation**

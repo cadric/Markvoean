@@ -27,6 +27,7 @@ lib_sources = [
   '../src/core/window_lifecycle.c',
   '../src/document/document.c',
   '../src/document/document_manager.c',
+  '../src/document/doc_state.c',
   '../src/ui/actions/file_actions.c',
   '../src/ui/actions/app_actions.c',
   '../src/ui/dialogs/dialogs.c',
@@ -51,7 +52,8 @@ gtktext_lib = static_library('gtktext_test',
 # Test sources
 test_sources = [
   'test_lists.c',
-  'test_async_document.c'
+  'test_async_document.c',
+  'test_doc_state.c'
 ]
 
 # Set up test environment with GSettings schema directory

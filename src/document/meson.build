@@ -6,7 +6,8 @@ document_sources = []
 # Document management modules
 document_sources += files(
   'document.c',
-  'document_manager.c'
+  'document_manager.c',
+  'doc_state.c'
 )
 
 # Export sources for parent build

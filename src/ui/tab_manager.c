@@ -388,7 +388,7 @@ static void show_unsaved_changes_dialog(TabManager *tm, AdwTabView *tab_view, Ad
 
     /* Add dialog responses */
     adw_alert_dialog_add_response(dialog, "cancel", _("Cancel"));
-    adw_alert_dialog_add_response(dialog, "discard", _("Close without Saving"));
+    adw_alert_dialog_add_response(dialog, "discard", _("Don't Save"));
     adw_alert_dialog_add_response(dialog, "save", _("Save"));
 
     /* Set default and suggested responses */
@@ -470,7 +470,7 @@ void tab_manager_show_window_close_dialog(GtkWindow *window, TabDocument *tab_do
 
     /* Add dialog responses - same as tab dialog */
     adw_alert_dialog_add_response(dialog, "cancel", _("Cancel"));
-    adw_alert_dialog_add_response(dialog, "discard", _("Close without Saving"));
+    adw_alert_dialog_add_response(dialog, "discard", _("Don't Save"));
     adw_alert_dialog_add_response(dialog, "save", _("Save"));
 
     /* Set default and suggested responses */

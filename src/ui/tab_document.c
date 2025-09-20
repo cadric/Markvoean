@@ -206,6 +206,9 @@ static GtkWidget *create_text_editor_widget(TabDocument *td)
 
     td->buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(td->text_view));
 
+    /* Enable undo/redo functionality */
+    gtk_text_buffer_set_enable_undo(td->buffer, TRUE);
+
     /* Set up event controllers for zoom and interactions */
     GtkEventController *key_controller = gtk_event_controller_key_new();
     g_signal_connect(key_controller, "key-pressed", G_CALLBACK(event_handlers_on_key_pressed), td->text_view);
@@ -234,6 +237,10 @@ static GtkWidget *create_text_editor_widget(TabDocument *td)
 
     /* Create source text view and buffer */
     td->source_buffer = gtk_text_buffer_new(NULL);
+
+    /* Enable undo/redo functionality */
+    gtk_text_buffer_set_enable_undo(td->source_buffer, TRUE);
+
     td->source_text_view = gtk_text_view_new_with_buffer(td->source_buffer);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(td->source_text_view), GTK_WRAP_WORD);
     gtk_text_view_set_left_margin(GTK_TEXT_VIEW(td->source_text_view), 12);
@@ -1155,8 +1162,14 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
         return FALSE;
     }
 
-    /* Set markdown content in source buffer */
-    gtk_text_buffer_set_text(td->source_buffer, markdown, -1);
+    /* Set markdown content in source buffer while preserving undo history */
+    /* Important: Use delete+insert instead of set_text to preserve undo history */
+    /* This allows users to undo through view switches, maintaining editing context */
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(td->source_buffer, &start, &end);
+    gtk_text_buffer_delete(td->source_buffer, &start, &end);
+    gtk_text_buffer_get_start_iter(td->source_buffer, &start);
+    gtk_text_buffer_insert(td->source_buffer, &start, markdown, -1);
 
     /* Note: Do not update baseline here - view switching should preserve dirty state */
     /* Baseline updates should only happen during actual file operations (load/save) */

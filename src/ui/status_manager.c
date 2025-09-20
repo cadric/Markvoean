@@ -80,19 +80,19 @@ update_status_bar_for_state(GtkApplication *app, DocumentState state,
 
     g_return_if_fail(GTK_IS_APPLICATION(app));
 
-    /* Determine status text based on document state */
+    /* Simplified status text - focus on clean/dirty state */
     switch (state) {
         case DOC_STATE_CLEAN:
             status_text = _("Saved");
             break;
         case DOC_STATE_DIRTY:
-            status_text = _("Modified");
+            status_text = _("Unsaved changes");
             break;
         case DOC_STATE_SAVING:
             status_text = _("Saving...");
             break;
         case DOC_STATE_DRAFT:
-            status_text = _("Draft saved");
+            status_text = _("Draft");
             break;
         case DOC_STATE_READONLY:
             status_text = _("Read-only");
@@ -101,10 +101,11 @@ update_status_bar_for_state(GtkApplication *app, DocumentState state,
             status_text = _("External changes detected");
             break;
         case DOC_STATE_ERROR:
-            status_text = _("Save error");
+            status_text = _("Error");
             break;
         default:
-            status_text = _("Unknown");
+            /* With new system, should only be CLEAN or DIRTY */
+            status_text = (state == DOC_STATE_DIRTY) ? _("Unsaved changes") : _("Saved");
             break;
     }
 

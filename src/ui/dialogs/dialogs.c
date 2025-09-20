@@ -347,8 +347,18 @@ static GtkWidget *create_file_row(RecoveryFileItem *item)
     gtk_box_append(GTK_BOX(box), primary_label);
 
     /* Secondary label - file type and path */
+    /* Check if this is a version file or recovery file by extension */
+    const gchar *file_type;
+    if (g_str_has_suffix(item->file_path, ".version")) {
+        file_type = _("Version");
+    } else if (item->is_draft) {
+        file_type = _("Draft");
+    } else {
+        file_type = _("Recovery");
+    }
+
     g_autofree gchar *secondary_text = g_strdup_printf("%s • %s",
-                                                       item->is_draft ? _("Draft") : _("Recovery"),
+                                                       file_type,
                                                        item->file_path);
     GtkWidget *secondary_label = gtk_label_new(secondary_text);
     gtk_widget_set_halign(secondary_label, GTK_ALIGN_START);
@@ -391,6 +401,32 @@ static void populate_recovery_list(RecoveryDialogData *data)
             item->file_path = g_strdup(recovery_files[i]);
             item->display_name = g_strdup(document_manager_get_recovery_display_name(recovery_files[i]));
             item->is_draft = FALSE;
+
+            GtkWidget *row_content = create_file_row(item);
+            GtkWidget *row = gtk_list_box_row_new();
+            gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_content);
+            g_object_set_data_full(G_OBJECT(row), "file-item", item,
+                                  (GDestroyNotify)recovery_file_item_free);
+
+            gtk_list_box_append(data->list_box, row);
+        }
+    }
+}
+
+static void populate_document_recovery_list(RecoveryDialogData *data, const gchar *document_path)
+{
+    /* For document-specific version history, we show version history files for this document */
+    /* Version history files are different from recovery files - they contain saved versions */
+
+    /* Get version history files for the specific document */
+    g_auto(GStrv) version_files = document_manager_list_version_history(document_path);
+    if (version_files) {
+        for (gsize i = 0; version_files[i] != NULL; i++) {
+            RecoveryFileItem *item = g_new0(RecoveryFileItem, 1);
+            item->dialog_data = data;
+            item->file_path = g_strdup(version_files[i]);
+            item->display_name = g_strdup(document_manager_get_version_display_name(version_files[i]));
+            item->is_draft = FALSE; /* Version files are not drafts */
 
             GtkWidget *row_content = create_file_row(item);
             GtkWidget *row = gtk_list_box_row_new();
@@ -492,6 +528,125 @@ void dialogs_show_recovery_browser(GtkWindow *parent,
 
     /* Populate the list */
     populate_recovery_list(data);
+
+    /* Connect closed handler */
+    g_signal_connect(data->dialog, "closed", G_CALLBACK(on_recovery_dialog_closed), data);
+
+    /* Show the dialog */
+    GtkWidget *parent_widget = parent ? GTK_WIDGET(parent) : NULL;
+    if (!parent_widget) {
+        GtkApplication *app = GTK_APPLICATION(g_application_get_default());
+        if (app) {
+            GtkWindow *active_window = gtk_application_get_active_window(app);
+            if (active_window) {
+                parent_widget = GTK_WIDGET(active_window);
+            }
+        }
+    }
+
+    if (parent_widget) {
+        adw_dialog_present(data->dialog, parent_widget);
+    }
+}
+
+/* Show document-specific version history dialog */
+void dialogs_show_document_version_history(GtkWindow *parent,
+                                          const gchar *document_path,
+                                          RecoveryActionCallback callback,
+                                          gpointer user_data)
+{
+    g_return_if_fail(parent == NULL || GTK_IS_WINDOW(parent));
+    g_return_if_fail(document_path != NULL);
+
+    /* Create dialog data */
+    RecoveryDialogData *data = g_new0(RecoveryDialogData, 1);
+    data->callback = callback;
+    data->user_data = user_data;
+
+    /* Create the main dialog */
+    data->dialog = ADW_DIALOG(adw_dialog_new());
+
+    /* Set title based on document name */
+    g_autofree gchar *document_basename = g_path_get_basename(document_path);
+    g_autofree gchar *title = g_strdup_printf(_("Version History - %s"), document_basename);
+    adw_dialog_set_title(data->dialog, title);
+    adw_dialog_set_content_width(data->dialog, 600);
+    adw_dialog_set_content_height(data->dialog, 400);
+
+    /* Create main content box */
+    GtkWidget *content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+    /* Create header */
+    GtkWidget *header = adw_header_bar_new();
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header),
+                                   gtk_label_new(title));
+
+    /* Add cancel button */
+    GtkWidget *cancel_button = gtk_button_new_with_label(_("Cancel"));
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header), cancel_button);
+    g_signal_connect_swapped(cancel_button, "clicked",
+                            G_CALLBACK(adw_dialog_close), data->dialog);
+
+    gtk_box_append(GTK_BOX(content_box), header);
+
+    /* Create main content area */
+    GtkWidget *main_content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(main_content, 24);
+    gtk_widget_set_margin_end(main_content, 24);
+    gtk_widget_set_margin_top(main_content, 12);
+    gtk_widget_set_margin_bottom(main_content, 24);
+
+    /* Add description for document-specific version history */
+    g_autofree gchar *description_text = g_strdup_printf(
+        _("Select a previous version of \"%s\" to restore or remove:"), document_basename);
+    GtkWidget *description = gtk_label_new(description_text);
+    gtk_widget_set_halign(description, GTK_ALIGN_START);
+    gtk_widget_add_css_class(description, "dim-label");
+    gtk_box_append(GTK_BOX(main_content), description);
+
+    /* Create scrolled window for file list */
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 200);
+    gtk_widget_set_vexpand(scrolled, TRUE);
+
+    /* Create list box */
+    data->list_box = GTK_LIST_BOX(gtk_list_box_new());
+    gtk_list_box_set_selection_mode(data->list_box, GTK_SELECTION_SINGLE);
+    gtk_widget_add_css_class(GTK_WIDGET(data->list_box), "boxed-list");
+    g_signal_connect(data->list_box, "row-selected",
+                    G_CALLBACK(on_list_box_row_selected), data);
+
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(data->list_box));
+    gtk_box_append(GTK_BOX(main_content), scrolled);
+
+    /* Create action buttons */
+    GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_halign(button_box, GTK_ALIGN_END);
+
+    data->remove_button = gtk_button_new_with_label(_("Remove"));
+    gtk_widget_add_css_class(data->remove_button, "destructive-action");
+    gtk_widget_set_sensitive(data->remove_button, FALSE);
+    g_signal_connect(data->remove_button, "clicked",
+                    G_CALLBACK(on_recovery_action_clicked), data);
+    gtk_box_append(GTK_BOX(button_box), data->remove_button);
+
+    data->open_button = gtk_button_new_with_label(_("Restore"));
+    gtk_widget_add_css_class(data->open_button, "suggested-action");
+    gtk_widget_set_sensitive(data->open_button, FALSE);
+    g_signal_connect(data->open_button, "clicked",
+                    G_CALLBACK(on_recovery_action_clicked), data);
+    gtk_box_append(GTK_BOX(button_box), data->open_button);
+
+    gtk_box_append(GTK_BOX(main_content), button_box);
+    gtk_box_append(GTK_BOX(content_box), main_content);
+
+    /* Set dialog content */
+    adw_dialog_set_child(data->dialog, content_box);
+
+    /* Populate the list with document-specific recovery files */
+    populate_document_recovery_list(data, document_path);
 
     /* Connect closed handler */
     g_signal_connect(data->dialog, "closed", G_CALLBACK(on_recovery_dialog_closed), data);

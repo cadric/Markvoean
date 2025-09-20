@@ -54,6 +54,11 @@ void dialogs_show_recovery_browser(GtkWindow *parent,
                                   RecoveryActionCallback callback,
                                   gpointer user_data);
 
+void dialogs_show_document_version_history(GtkWindow *parent,
+                                          const gchar *document_path,
+                                          RecoveryActionCallback callback,
+                                          gpointer user_data);
+
 G_END_DECLS
 
 #endif /* GTKTEXT_UI_DIALOGS_H */

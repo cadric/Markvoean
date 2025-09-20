@@ -21,6 +21,8 @@ typedef struct {
     AdwDialog *dialog;
     GSettings *settings;
     AdwSwitchRow *autosave_switch;
+    AdwSwitchRow *version_history_switch;
+    AdwSpinRow *version_history_count_row;
     AdwComboRow *toolbar_style_row;
     AdwSwitchRow *toolbar_customization_switch;
     AdwPreferencesGroup *toolbar_order_group;
@@ -38,6 +40,12 @@ static void settings_reset(SettingsComponent *c) {
     }
     if (c->autosave_switch) {
         c->autosave_switch = NULL;
+    }
+    if (c->version_history_switch) {
+        c->version_history_switch = NULL;
+    }
+    if (c->version_history_count_row) {
+        c->version_history_count_row = NULL;
     }
     if (c->toolbar_style_row) {
         c->toolbar_style_row = NULL;
@@ -75,6 +83,39 @@ static void on_autosave_switch_changed(AdwSwitchRow *switch_row,
     g_settings_set_boolean(c->settings, "autosave-enabled", enabled);
 
     g_debug("Autosave setting changed to: %s", enabled ? "enabled" : "disabled");
+}
+
+static void on_version_history_switch_changed(AdwSwitchRow *switch_row,
+                                             GParamSpec *pspec,
+                                             gpointer user_data)
+{
+    (void)pspec;
+    SettingsComponent *c = (SettingsComponent *)user_data;
+    g_return_if_fail(c != NULL && c->settings != NULL);
+
+    gboolean enabled = adw_switch_row_get_active(switch_row);
+    g_settings_set_boolean(c->settings, "version-history-enabled", enabled);
+
+    /* Show/hide the count row based on switch state */
+    if (c->version_history_count_row) {
+        gtk_widget_set_sensitive(GTK_WIDGET(c->version_history_count_row), enabled);
+    }
+
+    g_debug("Version history setting changed to: %s", enabled ? "enabled" : "disabled");
+}
+
+static void on_version_history_count_changed(AdwSpinRow *spin_row,
+                                            GParamSpec *pspec,
+                                            gpointer user_data)
+{
+    (void)pspec;
+    SettingsComponent *c = (SettingsComponent *)user_data;
+    g_return_if_fail(c != NULL && c->settings != NULL);
+
+    int count = (int)adw_spin_row_get_value(spin_row);
+    g_settings_set_int(c->settings, "version-history-max-versions", count);
+
+    g_debug("Version history max versions changed to: %d", count);
 }
 
 static void on_toolbar_style_changed(AdwComboRow *combo_row,
@@ -132,6 +173,16 @@ static void settings_connect_signals(SettingsComponent *c) {
     if (c->autosave_switch) {
         g_signal_connect(c->autosave_switch, "notify::active",
                         G_CALLBACK(on_autosave_switch_changed), c);
+    }
+
+    if (c->version_history_switch) {
+        g_signal_connect(c->version_history_switch, "notify::active",
+                        G_CALLBACK(on_version_history_switch_changed), c);
+    }
+
+    if (c->version_history_count_row) {
+        g_signal_connect(c->version_history_count_row, "notify::value",
+                        G_CALLBACK(on_version_history_count_changed), c);
     }
 
     if (c->toolbar_style_row) {
@@ -193,6 +244,37 @@ AdwDialog* create_settings_window(GtkWindow *parent) {
     
     // Add switch to group
     adw_preferences_group_add(group, GTK_WIDGET(settings_state.autosave_switch));
+
+    // Create version history switch
+    GtkWidget *version_history_switch_widget = adw_switch_row_new();
+    settings_state.version_history_switch = ADW_SWITCH_ROW(version_history_switch_widget);
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(settings_state.version_history_switch), _("Enable Version History"));
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(settings_state.version_history_switch),
+                               _("Save document versions each time you save"));
+
+    // Set initial state from GSettings
+    gboolean version_history_enabled = g_settings_get_boolean(settings_state.settings, "version-history-enabled");
+    adw_switch_row_set_active(settings_state.version_history_switch, version_history_enabled);
+
+    // Add version history switch to group
+    adw_preferences_group_add(group, GTK_WIDGET(settings_state.version_history_switch));
+
+    // Create version history count spin row
+    GtkWidget *version_history_count_widget = adw_spin_row_new_with_range(1.0, 50.0, 1.0);
+    settings_state.version_history_count_row = ADW_SPIN_ROW(version_history_count_widget);
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(settings_state.version_history_count_row), _("Maximum Versions"));
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(settings_state.version_history_count_row),
+                               _("Maximum number of versions to keep per document"));
+
+    // Set initial value from GSettings
+    int max_versions = g_settings_get_int(settings_state.settings, "version-history-max-versions");
+    adw_spin_row_set_value(settings_state.version_history_count_row, (double)max_versions);
+
+    // Set sensitivity based on version history enabled state
+    gtk_widget_set_sensitive(GTK_WIDGET(settings_state.version_history_count_row), version_history_enabled);
+
+    // Add count row to group
+    adw_preferences_group_add(group, GTK_WIDGET(settings_state.version_history_count_row));
 
     /* Future settings can be added here */
 

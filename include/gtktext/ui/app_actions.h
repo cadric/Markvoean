@@ -21,6 +21,7 @@ G_BEGIN_DECLS
 void app_action_preferences_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void app_action_about_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void app_action_shortcuts_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+void app_action_quit_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
 G_END_DECLS
 

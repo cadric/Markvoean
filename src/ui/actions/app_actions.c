@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
    Purpose: Application action callbacks (preferences, about, shortcuts)
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.1] - 2025-09-16 - ui/actions/app_actions.c
-   Changed: Extracted app actions from main.c for better organization
+   [1.0.2] - 2025-09-20 - ui/actions/app_actions.c
+   Changed: Fixed quit action to check for unsaved changes and show save dialog
 */
 
 #ifdef HAVE_CONFIG_H
@@ -15,6 +15,7 @@
 
 #include <gtktext/ui/app_actions.h>
 #include <gtktext/core/settings.h>
+#include <gtktext/core/window_lifecycle.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HANDLERS - Application action callbacks
@@ -94,4 +95,28 @@ void app_action_shortcuts_cb(GSimpleAction *action, GVariant *parameter, gpointe
         gtk_window_set_transient_for(GTK_WINDOW(shortcuts_window), parent);
         gtk_window_present(GTK_WINDOW(shortcuts_window));
     }
+}
+
+/* Quit application action callback */
+void app_action_quit_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    GtkApplication *app = GTK_APPLICATION(user_data);
+
+    /* Get the active window to handle unsaved changes dialog */
+    GtkWindow *window = gtk_application_get_active_window(app);
+    if (!window) {
+        g_application_quit(G_APPLICATION(app));
+        return;
+    }
+
+    /* Use the same logic as window close request to handle unsaved changes */
+    if (window_lifecycle_on_window_close_request(window, NULL)) {
+        /* Function returned TRUE, meaning there are unsaved changes and dialog is shown */
+        /* Don't quit - let the user handle the dialog */
+        return;
+    }
+
+    /* No unsaved changes, proceed with quit */
+    g_application_quit(G_APPLICATION(app));
 }

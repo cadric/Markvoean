@@ -6,6 +6,7 @@ ui_sources = []
 # Add action modules
 ui_sources += files(
   'actions/file_actions.c',
+  'actions/edit_actions.c',
   'actions/app_actions.c'
 )
 

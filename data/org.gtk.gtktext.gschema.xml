@@ -85,6 +85,23 @@
         When disabled, uses the default button order.
       </description>
     </key>
+    <key name="version-history-enabled" type="b">
+      <default>true</default>
+      <summary>Enable version history</summary>
+      <description>
+        When enabled, the application will save previous versions of documents
+        on each save operation. These can be restored later if needed.
+      </description>
+    </key>
+    <key name="version-history-max-versions" type="i">
+      <default>10</default>
+      <range min="1" max="50"/>
+      <summary>Maximum number of versions to keep</summary>
+      <description>
+        Maximum number of previous versions to keep per document. Older versions
+        are automatically deleted when this limit is exceeded.
+      </description>
+    </key>
   </schema>
   <!-- Keep schema id and path in sync with application code and install path. -->
   <!-- Installed to: share/glib-2.0/schemas/org.gtk.gtktext.gschema.xml -->

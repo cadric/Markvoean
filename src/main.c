@@ -18,6 +18,7 @@
 #include <gtktext/core/window_lifecycle.h>
 #include <gtktext/core/signal_manager.h>
 #include <gtktext/ui/file_actions.h>
+#include <gtktext/ui/edit_actions.h>
 #include <gtktext/ui/app_actions.h>
 #include <gtktext/ui/tab_integration.h>
 
@@ -99,9 +100,13 @@ int main(int argc, char *argv[])
         { "open", file_action_open_cb, NULL, NULL, NULL, {0} },
         { "save", file_action_save_cb, NULL, NULL, NULL, {0} },
         { "save-as", file_action_save_as_cb, NULL, NULL, NULL, {0} },
+        { "undo", edit_action_undo_cb, NULL, NULL, NULL, {0} },
+        { "redo", edit_action_redo_cb, NULL, NULL, NULL, {0} },
+        { "version-history", edit_action_version_history_cb, NULL, NULL, NULL, {0} },
         { "preferences", app_action_preferences_cb, NULL, NULL, NULL, {0} },
         { "about", app_action_about_cb, NULL, NULL, NULL, {0} },
         { "shortcuts", app_action_shortcuts_cb, NULL, NULL, NULL, {0} },
+        { "quit", app_action_quit_cb, NULL, NULL, NULL, {0} },
     };
 
     g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, 
@@ -109,16 +114,20 @@ int main(int argc, char *argv[])
 
   // Debug: To inspect actions at runtime, run with GTK_DEBUG=actions
   // Tab shortcuts (HIG compliant)
-  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.new-tab", (const char*[]){ "<primary>t", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.new-tab", (const char*[]){ "<primary>t", "<primary>n", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.close-tab", (const char*[]){ "<primary>w", NULL });
   // File shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.open", (const char*[]){ "<primary>o", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save", (const char*[]){ "<primary>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save-as", (const char*[]){ "<primary><shift>s", NULL });
+  // Edit shortcuts
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.undo", (const char*[]){ "<primary>z", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.redo", (const char*[]){ "<primary><shift>z", "<primary>y", NULL });
   // App shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.preferences", (const char*[]){ "<primary>comma", NULL });
-  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.shortcuts", (const char*[]){ "<primary>question", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.shortcuts", (const char*[]){ "<primary>question", "F1", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.about", (const char*[]){ NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.quit", (const char*[]){ "<primary>q", NULL });
 
   g_signal_connect (app, "activate", G_CALLBACK (window_lifecycle_app_activate), NULL);
   g_signal_connect (app, "open", G_CALLBACK (window_lifecycle_app_open), NULL);

@@ -1354,7 +1354,9 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     size_t md_len = g_utf8_strlen(markdown_text, -1);
     if (md_len == 0) {
         g_debug("[parse] Empty markdown text provided, clearing buffer");
-        gtk_text_buffer_set_text(buffer, "", 0);
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(buffer, &start, &end);
+        gtk_text_buffer_delete(buffer, &start, &end);
         return TRUE;
     }
     if (md_len > 1000000) { // 1MB limit for safety

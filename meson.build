@@ -1,8 +1,8 @@
-# [2.1.2] - 2025-09-20 - meson.build
-# Enhanced: Copy function now preserves markdown formatting when copying selections
+# [2.5.6] - 2025-09-20 - meson.build
+# Fixed: Ctrl+Q quit action now checks for unsaved changes and shows save dialog
 
 project('gtktext', 'c',
-  version: '2.1.2',
+  version: '2.5.6',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- [0.2.0] - 2025-09-15 - ui/shortcuts.ui
-     Added: Keyboard shortcuts window for better accessibility and discoverability.
+<!-- [2.4.0] - 2025-09-20 - ui/shortcuts.ui
+     Updated: Complete keyboard shortcuts guide with all current shortcuts including undo/redo and tab operations.
 -->
 <interface>
   <requires lib="gtk" version="4.0"/>
@@ -38,6 +38,29 @@
                 <property name="accelerator">&lt;Primary&gt;comma</property>
               </object>
             </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title" translatable="yes">Quit Application</property>
+                <property name="accelerator">&lt;Primary&gt;q</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title" translatable="yes">Tab Operations</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title" translatable="yes">New Tab</property>
+                <property name="accelerator">&lt;Primary&gt;t &lt;Primary&gt;n</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title" translatable="yes">Close Tab</property>
+                <property name="accelerator">&lt;Primary&gt;w</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
@@ -45,10 +68,27 @@
             <property name="title" translatable="yes">Editing</property>
             <child>
               <object class="GtkShortcutsShortcut">
+                <property name="title" translatable="yes">Undo</property>
+                <property name="accelerator">&lt;Primary&gt;z</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title" translatable="yes">Redo</property>
+                <property name="accelerator">&lt;Primary&gt;&lt;Shift&gt;z &lt;Primary&gt;y</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
                 <property name="title" translatable="yes">Copy as Markdown</property>
                 <property name="accelerator">&lt;Primary&gt;c</property>
               </object>
             </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title" translatable="yes">View</property>
             <child>
               <object class="GtkShortcutsShortcut">
                 <property name="title" translatable="yes">Zoom In</property>
@@ -75,13 +115,7 @@
             <child>
               <object class="GtkShortcutsShortcut">
                 <property name="title" translatable="yes">Show Shortcuts</property>
-                <property name="accelerator">&lt;Primary&gt;question</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkShortcutsShortcut">
-                <property name="title" translatable="yes">Quit Application</property>
-                <property name="accelerator">&lt;Primary&gt;q</property>
+                <property name="accelerator">&lt;Primary&gt;question F1</property>
               </object>
             </child>
           </object>
