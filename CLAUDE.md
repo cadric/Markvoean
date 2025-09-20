@@ -8,6 +8,7 @@
 - Update version + changelog.
 - KISS principle
 ---
+
 ## 🧭 Guiding Principles
 
 1. **Simplicity**: idiomatic C + GLib/GObject only.
@@ -17,6 +18,7 @@
 5. **Accessibility**: keyboard, AT‑SPI, contrast, i18n.
 6. **use context7**: Up-to-date documentation.
 ---
+
 ## ⚠️ Prohibited Practices
 
 - ❌ Block UI thread (no sync I/O).
@@ -25,8 +27,9 @@
 - ❌ Override Adwaita theme.
 - ❌ Deprecated APIs (check GTK4/libadwaita docs).
 - ❌ Global mutable state (prefer instances; justify singletons).
-- ❌ NEWER TYPE "You're absolutely right"
+- ❌ NEWER USE “You’re absolutely right”
 ---
+
 ## 🔄 Version Control & Workflow
 
 **SemVer** in `meson.build` → `project(version:)`; mirror in AppStream.
@@ -44,6 +47,7 @@
 **Release**: CI green → update AppStream notes → tag `vX.Y.Z` (signed) → produce Flatpak bundle or tarball and attach.
 
 ---
+
 ## 📐 Code Standards (C, GLib, GObject)
 
 - **Language**: C17 (C11 ok). Prefer clarity over cleverness.
@@ -124,6 +128,7 @@ static void setup_logging(void){
 - Wrap user strings in `_()`; use `ngettext()` for plurals.
 - Mark translatable strings in `.ui` files.
 ---
+
 ## ⚙️ Build & Tooling
 
 - **Build**: Meson + Ninja. `pkg-config`: `gtk4`, `libadwaita-1`, others as needed.
@@ -146,6 +151,7 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 - Debounce bursty handlers; coalesce updates.
 - Worker threads for CPU heavy; marshal back to main thread.
 ---
+
 ## 🧪 Testing
 
 - GLib test framework; deterministic, headless.
@@ -153,6 +159,7 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 - Run ASan/UBSan or Valgrind on changed paths.
 - CI: `meson test --print-errorlogs`.
 ---
+
 ## 🔒 Security
 
 - Use GIO for file/process ops; never `system()` in core.
@@ -161,10 +168,12 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 - Validate/sanitize all external input; never execute user data.
 - For tests, set `GIO_USE_VFS` as needed; avoid host paths in Flatpak.
 ---
+
 ## 📦 Packaging & Releases
 
 1. Clean build, no warnings, tests pass. 2) Update AppStream metainfo.xml and desktop file if needed. 3) Validate with `appstream‑cli` and `desktop-file-validate`; verify icons/categories. 4) Ensure consistent reverse-DNS application ID across all files. 5) Tag and publish; attach Flatpak bundle or source tarball.
 ---
+
 ## ✅ MR/PR Review Checklist
 
 - HIG followed; GtkBuilder UI.
@@ -176,6 +185,7 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 - Hardening flags intact; no new warnings; tests pass; no leaks.
 - Docs + changelog updated for user‑visible changes.
 ---
+
 ## 🧭 AI Assistant Playbook
 
 - Obey this file; keep diffs minimal and scoped.
@@ -184,6 +194,7 @@ add_project_link_arguments('-Wl,-z,relro','-Wl,-z,now',language:'c')
 - Propose tests with features/fixes.
 - If uncertain, add a precise TODO or question in MR.
 ---
+
 ## 🗑️ Deprecated / Do Not Use
 
 - GTK 3 or X11‑only APIs.

@@ -1200,9 +1200,6 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
         source_markdown = g_strdup("");
     }
 
-    /* Clear WYSIWYG buffer and set source content */
-    gtk_text_buffer_set_text(td->buffer, source_markdown, -1);
-
     /* Re-render markdown in WYSIWYG view */
     cm_render_markdown_to_buffer(td->buffer, source_markdown, GTK_TEXT_VIEW(td->text_view), NULL);
 
