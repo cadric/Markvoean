@@ -83,7 +83,7 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
         /* Block buffer change signals during deferred rendering */
 
         /* Block markdown engine automatic reparsing during initialization */
-        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+        render_set_suppress_reparse(td->buffer, TRUE);
         g_debug("DEFERRED: Suppressed markdown reparse during initialization");
 
         /* Also block DocumentManager buffer signals */
@@ -111,13 +111,11 @@ static void on_text_view_mapped(GtkWidget *text_view, gpointer user_data)
             document_manager_update_baseline(td->doc_manager);
             g_debug("DEFERRED: Updated DocumentManager baseline after markdown rendering");
 
-            /* Finalize initialization to enable buffer change detection */
-            document_manager_finalize_initialization(td->doc_manager);
-            g_debug("DEFERRED: Finalized DocumentManager initialization");
+            /* DocumentManager finalization now handled automatically */
         }
 
         /* Re-enable markdown engine automatic reparsing after initialization is complete */
-        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
+        render_set_suppress_reparse(td->buffer, FALSE);
         g_debug("DEFERRED: Re-enabled markdown reparse after initialization complete");
 
         /* Clean up the pending content */
@@ -342,15 +340,9 @@ void tab_document_initialize_document_manager(TabDocument *td, GtkWindow *window
                 g_debug("DocumentManager now knows about file: %s", td->file_path);
             }
 
-            /* Finalize initialization for non-markdown files (markdown files will be finalized after deferred rendering) */
-            if (!td->file_path || !g_str_has_suffix(td->file_path, ".md")) {
-                document_manager_finalize_initialization(td->doc_manager);
-                g_debug("Finalized DocumentManager initialization for non-markdown file");
-            }
+            /* DocumentManager adopt function now handles finalization automatically */
         } else {
-            /* For new documents (no file path), finalize initialization immediately */
-            document_manager_finalize_initialization(td->doc_manager);
-            g_debug("Finalized DocumentManager initialization for new document");
+            /* For new documents, DocumentManager initialization is handled automatically */
         }
 
         /* IMPORTANT: Set up state change callback AFTER all file operations complete */
@@ -573,7 +565,7 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
 
     /* Handle markdown rendering for both DocumentManager and fallback cases */
     if (g_str_has_suffix(file_path, ".md")) {
-        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+        render_set_suppress_reparse(td->buffer, TRUE);
         g_debug("LOAD: Suppressed markdown reparse for entire file loading process");
 
         /* Get buffer content for markdown rendering */
@@ -590,7 +582,7 @@ gboolean tab_document_load_file(TabDocument *td, const char *file_path, GError *
                                     GTK_TEXT_VIEW(td->text_view), NULL);
 
         /* Restore suppression flag as cmrender clears it internally */
-        g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+        render_set_suppress_reparse(td->buffer, TRUE);
         g_debug("LOAD: Restored markdown reparse suppression after initial rendering");
 
         /* Set up callback for when text view becomes mapped */
@@ -671,7 +663,7 @@ gboolean tab_document_load_file_finish(TabDocument *td, GAsyncResult *result, GE
 
             /* Handle markdown rendering for loaded content - use deferred rendering */
             if (g_str_has_suffix(loaded_path, ".md")) {
-                g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+                render_set_suppress_reparse(td->buffer, TRUE);
                 g_debug("ASYNC: Suppressed markdown reparse for async file loading");
 
                 /* Get buffer content for markdown rendering */
@@ -692,7 +684,7 @@ gboolean tab_document_load_file_finish(TabDocument *td, GAsyncResult *result, GE
                 g_debug("ASYNC: Applied theme styles to rendered markdown tags");
 
                 /* Restore suppression flag as cmrender clears it internally */
-                g_object_set_data(G_OBJECT(td->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+                render_set_suppress_reparse(td->buffer, TRUE);
                 g_debug("ASYNC: Restored markdown reparse suppression after initial rendering");
 
                 /* Set up callback for when text view becomes mapped */
@@ -1166,11 +1158,8 @@ static gboolean tab_document_sync_wysiwyg_to_source(TabDocument *td)
     /* Set markdown content in source buffer */
     gtk_text_buffer_set_text(td->source_buffer, markdown, -1);
 
-    /* Update DocumentManager baseline to match current buffer state */
-    if (td->doc_manager) {
-        document_manager_update_baseline(td->doc_manager);
-        g_debug("Updated DocumentManager baseline after WYSIWYG-to-source sync");
-    }
+    /* Note: Do not update baseline here - view switching should preserve dirty state */
+    /* Baseline updates should only happen during actual file operations (load/save) */
 
     /* Unblock buffer change signals */
 
@@ -1217,14 +1206,8 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
     /* Re-render markdown in WYSIWYG view */
     cm_render_markdown_to_buffer(td->buffer, source_markdown, GTK_TEXT_VIEW(td->text_view), NULL);
 
-    /* Cancel any reparse operations that may have been scheduled during rendering */
-    cancel_pending_reparse_markdown(td->buffer);
-
-    /* Update DocumentManager baseline to match the new buffer content */
-    if (td->doc_manager) {
-        document_manager_update_baseline(td->doc_manager);
-        g_debug("Updated DocumentManager baseline after source-to-WYSIWYG sync");
-    }
+    /* Note: Do not update baseline here - view switching should preserve dirty state */
+    /* Baseline updates should only happen during actual file operations (load/save) */
 
     /* Unblock buffer change signals */
 
@@ -1236,6 +1219,7 @@ static gboolean tab_document_sync_source_to_wysiwyg(TabDocument *td)
     g_debug("Synced source content to WYSIWYG view without triggering dirty state");
     return TRUE;
 }
+
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * WELCOME SCREEN CALLBACKS - Handle welcome screen button clicks

@@ -120,7 +120,7 @@ static void schedule_line_reparse(GtkTextBuffer *buffer, const GtkTextIter *iter
                      GINT_TO_POINTER(target));
 
     /* Mark that a user-initiated change has occurred */
-    g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(1));
+    render_set_user_change_pending(buffer, TRUE);
 
     /* Use a very short delay for real-time feedback */
     guint id = g_timeout_add_full(G_PRIORITY_LOW, 50, reparse_markdown_cb,
@@ -185,7 +185,7 @@ static gboolean reparse_markdown_cb(gpointer user_data)
     g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE, GINT_TO_POINTER(0));
 
     /* Clear user change pending flag */
-    g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(0));
+    render_set_user_change_pending(buffer, FALSE);
 
     return G_SOURCE_REMOVE;
 }
@@ -300,7 +300,7 @@ void markdown_engine_on_buffer_insert_text(GtkTextBuffer *buffer, GtkTextIter *l
 
     if (looks_like_paste) {
         /* Mark that a user-initiated change has occurred before reparse */
-        g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending", GINT_TO_POINTER(1));
+        render_set_user_change_pending(buffer, TRUE);
 
         schedule_reparse_markdown(buffer, len, location);
     }
@@ -321,4 +321,55 @@ void markdown_engine_initialize_buffer(GtkTextBuffer *buffer, GtkTextView *text_
     /* Connect buffer insert text signal for real-time parsing */
     g_signal_connect(buffer, "insert-text",
                     G_CALLBACK(markdown_engine_on_buffer_insert_text), NULL);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * TYPED RENDER HELPERS - Phase 3: Replace string-based g_object_data
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+void render_set_suppress_reparse(GtkTextBuffer *buffer, gboolean suppress)
+{
+    g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
+    g_object_set_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE,
+                     GINT_TO_POINTER(suppress ? 1 : 0));
+}
+
+gboolean render_get_suppress_reparse(GtkTextBuffer *buffer)
+{
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
+    return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE)) != 0;
+}
+
+void render_set_user_change_pending(GtkTextBuffer *buffer, gboolean pending)
+{
+    g_return_if_fail(GTK_IS_TEXT_BUFFER(buffer));
+    g_object_set_data(G_OBJECT(buffer), "gtktext-user-change-pending",
+                     GINT_TO_POINTER(pending ? 1 : 0));
+}
+
+gboolean render_get_user_change_pending(GtkTextBuffer *buffer)
+{
+    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
+    return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), "gtktext-user-change-pending")) != 0;
+}
+
+RenderSuppressGuard render_begin_suppress_reparse(GtkTextBuffer *buffer)
+{
+    RenderSuppressGuard guard = {
+        .buffer = buffer,
+        .was_suppressed = render_get_suppress_reparse(buffer)
+    };
+
+    if (!guard.was_suppressed) {
+        render_set_suppress_reparse(buffer, TRUE);
+    }
+
+    return guard;
+}
+
+void render_end_suppress_reparse(RenderSuppressGuard *guard)
+{
+    if (guard && guard->buffer && !guard->was_suppressed) {
+        render_set_suppress_reparse(guard->buffer, FALSE);
+    }
 }

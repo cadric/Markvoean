@@ -1,8 +1,8 @@
-# [1.6.0] - 2025-09-19 - meson.build
-# Changed: Phase 2 async migration - Removed UI file reads, signal patterns, internal buffer gating
+# [2.0.0] - 2025-09-20 - meson.build
+# Changed: Phase 3 major bump - Clean API surface, conflict resolution, typed render helpers
 
 project('gtktext', 'c',
-  version: '1.6.0',
+  version: '2.0.0',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c17',

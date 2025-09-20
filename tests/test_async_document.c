@@ -319,8 +319,7 @@ static void test_document_manager_open_then_save_cycle(void)
     g_assert_true(ctx->operation_success);
     g_assert_cmpint(document_manager_get_state(ctx->dm), ==, DOC_STATE_CLEAN);
 
-    /* Finalize DocumentManager initialization to enable change detection */
-    document_manager_finalize_initialization(ctx->dm);
+    /* DocumentManager finalization now happens automatically during open operation */
 
     /* Process any pending events */
     while (g_main_context_pending(NULL)) {
@@ -334,6 +333,10 @@ static void test_document_manager_open_then_save_cycle(void)
     while (g_main_context_pending(NULL)) {
         g_main_context_iteration(NULL, FALSE);
     }
+
+    /* Wait for debounce timer to expire (500ms + margin) */
+    g_timeout_add(600, timeout_quit_loop, ctx->loop);
+    g_main_loop_run(ctx->loop);
 
     g_assert_cmpint(document_manager_get_state(ctx->dm), ==, DOC_STATE_DIRTY);
 

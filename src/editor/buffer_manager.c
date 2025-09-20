@@ -20,7 +20,6 @@
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 /* Buffer data keys */
-static const char *DATA_SUPPRESS_PARSE = "gtktext-suppress-reparse";
 static const char *DATA_USER_DIRTY = "gtktext-user-dirty";
 
 #include <gtktext/ui/status_manager.h>
@@ -33,7 +32,7 @@ void buffer_manager_on_text_changed(GtkTextBuffer *buffer, gpointer user_data)
 {
     (void)user_data;
     /* Mark buffer as dirty only for user-initiated edits */
-    if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer), DATA_SUPPRESS_PARSE)) == 0) {
+    if (!render_get_suppress_reparse(buffer)) {
         g_object_set_data(G_OBJECT(buffer), DATA_USER_DIRTY, GINT_TO_POINTER(1));
 
         /* Update status bar to show modified status */

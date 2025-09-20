@@ -14,6 +14,7 @@
 #include <gtktext/render/theme_styles.h>
 #include <gtktext/render/hr_widget.h>
 #include <gtktext/render/safe_helpers.h>
+#include <gtktext/render/markdown/markdown_engine.h>
 #include <adwaita.h>
 #include <gtk/gtk.h>
 #include <libsoup/soup.h>
@@ -688,36 +689,6 @@ static void cm_render_insert_with_active_tags(GtkTextBuffer *buffer, GtkTextIter
     gtk_text_buffer_delete_mark(buffer, start_mark);
 }
 
-/* Safe version using typed helpers - Phase 2 enhancement */
-static SafeRenderResult cm_render_insert_with_active_tags_safe(GtkTextBuffer *buffer,
-                                                              GtkTextIter *iter,
-                                                              const char *text,
-                                                              GSList *active_tags)
-{
-    /* Use safe text insertion with tag application */
-    SafeRenderResult result = safe_buffer_insert_text_with_tags(buffer, iter, text,
-                                                               SAFE_TEXT_MAX_LENGTH,
-                                                               active_tags);
-
-    if (!result.success) {
-        /* Log the error but don't crash - degrade gracefully */
-        if (result.error) {
-            g_warning("Safe text insertion failed: %s", result.error->message);
-            safe_render_result_clear(&result);
-        }
-
-        /* Fallback to basic insertion without tags */
-        SafeRenderResult fallback = safe_buffer_insert_text(buffer, iter, text, SAFE_TEXT_MAX_LENGTH);
-        if (!fallback.success) {
-            g_warning("Fallback text insertion also failed - rendering may be incomplete");
-            return fallback;
-        }
-
-        return safe_render_result_success();
-    }
-
-    return result;
-}
 
 // Recursive function to render content of a node and its children.
 // Implements proper CommonMark block-level newline management.
@@ -1400,7 +1371,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
     g_use_visual_bullets = (text_view != NULL);
 
     // 1. Clear the buffer (suppress dirty marking while we render)
-    g_object_set_data(G_OBJECT(buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+    render_set_suppress_reparse(buffer, TRUE);
     GtkTextIter start_clear, end_clear;
     gtk_text_buffer_get_bounds(buffer, &start_clear, &end_clear);
     gtk_text_buffer_delete(buffer, &start_clear, &end_clear);
@@ -1502,7 +1473,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
         g_free(g_image_fetch_context);
         g_image_fetch_context = NULL;
     }
-    g_object_set_data(G_OBJECT(buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
+    render_set_suppress_reparse(buffer, FALSE);
     
     return TRUE;
 }

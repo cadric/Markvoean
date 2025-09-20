@@ -569,33 +569,17 @@ static void on_source_view_button_clicked(GtkButton *button, gpointer user_data)
         return;
     }
     
-    if (!tab_document_get_source_mode(tab_doc)) {
-        // === SWITCH TO SOURCE VIEW ===
-        if (tab_document_switch_to_source_view(tab_doc)) {
-            // Update UI state
-            GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
-            gtk_button_set_child(GTK_BUTTON(button), wysiwyg_icon);
-            gtk_widget_set_tooltip_text(GTK_WIDGET(button), _("Switch to WYSIWYG view"));
+    // Check current mode and toggle to the opposite
+    // Note: Using deprecated function temporarily for toggle logic - will be replaced in v2.0
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    gboolean was_in_source_mode = tab_document_get_source_mode(tab_doc);
+    #pragma GCC diagnostic pop
 
-            // Disable formatting buttons
-            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
-            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
-            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), FALSE);
-            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), FALSE);
-            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), FALSE);
-            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), FALSE);
-            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), FALSE);
-            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
-            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
-
-            g_debug("Switched to source view");
-        } else {
-            g_warning("Failed to switch to source view");
-        }
-
-    } else {
-        // === SWITCH BACK TO WYSIWYG VIEW ===
+    if (was_in_source_mode) {
+        // Currently in source mode, switch to WYSIWYG
         if (tab_document_switch_to_wysiwyg_view(tab_doc)) {
+            // === SWITCHED TO WYSIWYG VIEW ===
             // Update UI state
             GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
             gtk_button_set_child(GTK_BUTTON(button), source_icon);
@@ -612,9 +596,33 @@ static void on_source_view_button_clicked(GtkButton *button, gpointer user_data)
             if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
             if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
 
-            g_debug("Switched to WYSIWYG view");
+            g_debug("Switched from source to WYSIWYG view");
         } else {
-            g_warning("Failed to switch to WYSIWYG view");
+            g_warning("Failed to switch from source to WYSIWYG view");
+        }
+    } else {
+        // Currently in WYSIWYG mode, switch to source
+        if (tab_document_switch_to_source_view(tab_doc)) {
+            // === SWITCHED TO SOURCE VIEW ===
+            // Update UI state
+            GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
+            gtk_button_set_child(GTK_BUTTON(button), wysiwyg_icon);
+            gtk_widget_set_tooltip_text(GTK_WIDGET(button), _("Switch to WYSIWYG view"));
+
+            // Disable formatting buttons
+            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
+            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
+            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), FALSE);
+            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), FALSE);
+            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), FALSE);
+            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), FALSE);
+            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), FALSE);
+            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
+            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
+
+            g_debug("Switched from WYSIWYG to source view");
+        } else {
+            g_warning("Failed to switch from WYSIWYG to source view");
         }
     }
 }
@@ -932,45 +940,23 @@ void toolbar_update_text_view(GtkWidget *new_text_view)
                 if (active_page) {
                     TabDocument *tab_doc = tab_manager_get_tab_document(tm, active_page);
                     if (tab_doc) {
-                        // Sync toolbar UI with tab's current view mode
-                        gboolean is_source_mode = tab_document_get_source_mode(tab_doc);
-                        if (is_source_mode) {
-                            // Tab is in source mode - update toolbar to reflect this
-                            if (toolbar_state.source_view_button) {
-                                GtkWidget *wysiwyg_icon = gtk_image_new_from_icon_name("document-properties-symbolic");
-                                gtk_button_set_child(toolbar_state.source_view_button, wysiwyg_icon);
-                                gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button),
-                                                           _("Switch to WYSIWYG view"));
-                            }
-                            // Disable formatting buttons
-                            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), FALSE);
-                            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), FALSE);
-                            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), FALSE);
-                            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), FALSE);
-                            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), FALSE);
-                            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), FALSE);
-                            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), FALSE);
-                            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), FALSE);
-                            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), FALSE);
-                        } else {
-                            // Tab is in WYSIWYG mode - update toolbar to reflect this
-                            if (toolbar_state.source_view_button) {
-                                GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
-                                gtk_button_set_child(toolbar_state.source_view_button, source_icon);
-                                gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button),
-                                                           _("Switch to source view"));
-                            }
-                            // Enable formatting buttons
-                            if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
-                            if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
-                            if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), TRUE);
-                            if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), TRUE);
-                            if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), TRUE);
-                            if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), TRUE);
-                            if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), TRUE);
-                            if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
-                            if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
+                        // Set default WYSIWYG mode toolbar state - mode switching handles specific updates
+                        if (toolbar_state.source_view_button) {
+                            GtkWidget *source_icon = gtk_image_new_from_icon_name("document-edit-symbolic");
+                            gtk_button_set_child(toolbar_state.source_view_button, source_icon);
+                            gtk_widget_set_tooltip_text(GTK_WIDGET(toolbar_state.source_view_button),
+                                                       _("Switch to source view"));
                         }
+                        // Enable formatting buttons by default (WYSIWYG mode)
+                        if (toolbar_state.bold_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bold_button), TRUE);
+                        if (toolbar_state.italic_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.italic_button), TRUE);
+                        if (toolbar_state.inline_code_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.inline_code_button), TRUE);
+                        if (toolbar_state.code_block_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.code_block_button), TRUE);
+                        if (toolbar_state.blockquote_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.blockquote_button), TRUE);
+                        if (toolbar_state.bullet_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.bullet_list_button), TRUE);
+                        if (toolbar_state.numbered_list_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.numbered_list_button), TRUE);
+                        if (toolbar_state.hr_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.hr_button), TRUE);
+                        if (toolbar_state.heading_button) gtk_widget_set_sensitive(GTK_WIDGET(toolbar_state.heading_button), TRUE);
                     }
                 }
             }

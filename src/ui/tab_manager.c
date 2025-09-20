@@ -18,7 +18,6 @@
 #include <gtktext/ui/file_actions.h>
 #include <gtktext/components/toolbar.h>
 #include <gtktext/ui/status_manager.h>
-#include <gtktext/core/signal_manager.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Private implementation details
@@ -59,7 +58,7 @@ typedef struct {
 static void on_tab_view_page_detached(AdwTabView *tab_view, AdwTabPage *page, gint position, gpointer user_data);
 static gboolean page_belongs_to_view(AdwTabView *tab_view, AdwTabPage *page);
 static void safe_close_page_finish(AdwTabView *tab_view, AdwTabPage *page, gboolean confirm);
-static void on_tab_document_file_loaded(GObject *source_object, GAsyncResult *result, gpointer user_data);
+static void on_tab_document_file_loaded(GObject *source_object G_GNUC_UNUSED, GAsyncResult *result, gpointer user_data);
 
 /* Context for save-as dialog in close workflow */
 typedef struct {
@@ -1153,22 +1152,8 @@ void tab_manager_cleanup_all_signals(TabManager *tm)
     g_return_if_fail(tm != NULL);
     g_return_if_fail(tm->priv != NULL);
 
-    /* Clean up signal connections for all tabs */
-    SignalManager *sm = gtktext_get_signal_manager();
-    if (sm) {
-        g_debug("tab_manager_cleanup_all_signals: disconnecting signals for all tabs");
-        gint n_pages = adw_tab_view_get_n_pages(tm->priv->tab_view);
-        for (gint i = 0; i < n_pages; i++) {
-            AdwTabPage *page = adw_tab_view_get_nth_page(tm->priv->tab_view, i);
-            GtkWidget *text_view = tab_manager_get_text_view(tm, page);
-            if (text_view) {
-                GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-                if (buffer) {
-                    signal_manager_disconnect_buffer_changed(sm, buffer);
-                }
-            }
-        }
-    }
+    /* TabManager handles its own signal cleanup in destroy() - this function is deprecated */
+    g_debug("tab_manager_cleanup_all_signals: signals cleaned up automatically during TabDocument destruction");
 }
 
 gint tab_manager_get_tab_count(TabManager *tm)
@@ -1260,7 +1245,7 @@ void tab_manager_select_previous_tab(TabManager *tm)
  * ASYNC COMPLETION CALLBACKS
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-static void on_tab_document_file_loaded(GObject *source_object, GAsyncResult *result, gpointer user_data)
+static void on_tab_document_file_loaded(GObject *source_object G_GNUC_UNUSED, GAsyncResult *result, gpointer user_data)
 {
     /* Source object is DocumentManager, user_data is our context */
     AsyncLoadContext *ctx = (AsyncLoadContext*)user_data;
@@ -1292,20 +1277,8 @@ static void on_tab_document_file_loaded(GObject *source_object, GAsyncResult *re
 
         g_debug("About to handle markdown/DocumentManager finalization");
 
-        /* For markdown files, DocumentManager initialization will be finalized
-         * after deferred rendering is complete. For non-markdown files, finalize now. */
-        const gchar *file_path = document_manager_get_file_path(
-            tab_document_get_document_manager(ctx->tab_doc));
-
-        if (!file_path || !g_str_has_suffix(file_path, ".md")) {
-            DocumentManager *dm = tab_document_get_document_manager(ctx->tab_doc);
-            if (dm) {
-                document_manager_finalize_initialization(dm);
-                g_debug("Finalized DocumentManager for non-markdown file");
-            }
-        } else {
-            g_debug("Markdown file loaded - DocumentManager will be finalized after deferred rendering");
-        }
+        /* DocumentManager finalization now handled automatically by async operations */
+        g_debug("File loading completed - DocumentManager finalization handled automatically");
 
         g_debug("Async file load completed successfully");
 

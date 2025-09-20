@@ -12,6 +12,9 @@
 #include <gtktext/document/document_manager.h>
 #include <gtktext/render/cmrender.h>
 #include <gtktext/render/theme_styles.h>
+#include <gtktext/render/markdown/markdown_engine.h>
+#include <gtktext/ui/dialogs.h>
+#include <gtktext/ui/status_manager.h>
 #include <gtktext/core/util.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
@@ -51,6 +54,8 @@ struct _GtktextDocumentManager {
     /* Timers and monitoring */
     guint autosave_id;               /* autosave timer source ID */
     guint recovery_id;               /* recovery snapshot timer source ID */
+    guint debounce_id;               /* buffer change debounce timer source ID */
+    gboolean autosave_in_progress;   /* flag to prevent concurrent autosave operations */
     GFileMonitor *file_monitor;      /* ref - file change monitor */
     GSettings *settings;             /* ref - app settings for autosave control */
     
@@ -80,6 +85,11 @@ static guint signals[N_SIGNALS];
 
 static const guint AUTOSAVE_INTERVAL_MS = 3000;     /* 3 seconds */
 static const guint RECOVERY_INTERVAL_MS = 30000;    /* 30 seconds */
+static const guint DEBOUNCE_INTERVAL_MS = 500;      /* 500ms for buffer change debouncing */
+
+/* Forward declarations for internal functions */
+static void document_manager_finalize_initialization(DocumentManager *dm);
+static gboolean debounce_timeout_cb(gpointer user_data);
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * ERROR DOMAIN - DocumentManager error domain implementation
@@ -105,6 +115,10 @@ static void gtktext_document_manager_finalize(GObject *object)
     if (dm->recovery_id > 0) {
         g_source_remove(dm->recovery_id);
         dm->recovery_id = 0;
+    }
+    if (dm->debounce_id > 0) {
+        g_source_remove(dm->debounce_id);
+        dm->debounce_id = 0;
     }
 
     /* Disconnect signals */
@@ -155,6 +169,8 @@ static void gtktext_document_manager_init(GtktextDocumentManager *dm)
     /* Initialize instance - implementation will be added later */
     dm->state = DOC_STATE_CLEAN;
     dm->initialization_complete = FALSE;
+    dm->debounce_id = 0;
+    dm->autosave_in_progress = FALSE;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -187,10 +203,8 @@ static gchar* get_buffer_content_as_markdown(GtkTextBuffer *buffer)
 {
     g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), NULL);
 
-    /* For now, fallback to simple text extraction to fix the test */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    gchar *text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+    /* Use proper markdown extraction that preserves formatting tags */
+    gchar *text = cm_render_buffer_to_markdown(buffer);
 
     /* Debug what we're getting */
     g_debug("get_buffer_content_as_markdown: [%s] (length=%zu)",
@@ -815,17 +829,69 @@ static void update_file_metadata(DocumentManager *dm)
 }
 
 /* Placeholder for UI integration - will be implemented in UI phase */
+static void on_conflict_resolved(ConflictResolution resolution, gpointer user_data)
+{
+    DocumentManager *dm = GTKTEXT_DOCUMENT_MANAGER(user_data);
+    g_return_if_fail(dm != NULL);
+
+    GError *error = NULL;
+
+    switch (resolution) {
+        case CONFLICT_RESOLUTION_RELOAD:
+            /* User chose to reload from external file */
+            if (document_manager_resolve_conflict(dm, TRUE, &error)) {
+                g_debug("Successfully reloaded file from external version: %s", dm->file_path);
+            } else {
+                g_warning("Failed to reload from external version: %s",
+                         error ? error->message : "Unknown error");
+                g_clear_error(&error);
+            }
+            break;
+
+        case CONFLICT_RESOLUTION_KEEP:
+            /* User chose to keep current version */
+            if (document_manager_resolve_conflict(dm, FALSE, &error)) {
+                g_debug("Keeping current version, ignoring external changes: %s", dm->file_path);
+            } else {
+                g_warning("Failed to resolve conflict by keeping current version: %s",
+                         error ? error->message : "Unknown error");
+                g_clear_error(&error);
+            }
+            break;
+
+        case CONFLICT_RESOLUTION_MELD:
+            /* Future: Launch merge tool */
+            g_message("Merge tool integration not yet implemented");
+            /* For now, default to keeping current version */
+            if (document_manager_resolve_conflict(dm, FALSE, &error)) {
+                g_debug("Merge requested but not implemented, keeping current version");
+            } else {
+                g_warning("Failed to resolve conflict: %s",
+                         error ? error->message : "Unknown error");
+                g_clear_error(&error);
+            }
+            break;
+    }
+
+    /* Unref the DocumentManager as we took a reference when showing the dialog */
+    g_object_unref(dm);
+}
+
 static void show_external_change_dialog(DocumentManager *dm)
 {
     g_return_if_fail(dm != NULL);
-    
-    /* TODO: Implement UI dialog for conflict resolution */
-    g_debug("External change detected for: %s", dm->file_path);
-    g_debug("Conflict resolution dialog needed - UI integration pending");
-    
-    /* For now, just log the conflict */
-    g_message("External modification detected in file: %s", dm->file_path);
-    g_message("Please save your changes or resolve the conflict manually.");
+
+    /* Get the parent window for the dialog */
+    GtkWindow *parent_window = dm->window;
+
+    /* Take a reference to the DocumentManager for the async callback */
+    g_object_ref(dm);
+
+    /* Show the conflict resolution dialog */
+    dialogs_show_external_change_conflict(parent_window, dm->file_path,
+                                        on_conflict_resolved, dm);
+
+    g_debug("External change conflict dialog shown for: %s", dm->file_path);
 }
 
 /* File Utilities - File system operations and checks */
@@ -889,42 +955,95 @@ static void on_buffer_changed(GtkTextBuffer *buffer, gpointer user_data)
     g_return_if_fail(dm != NULL);
     g_return_if_fail(buffer != NULL);
 
+    /* Skip during initialization */
+    if (!dm->initialization_complete) {
+        g_debug("DocumentManager buffer changed during initialization - ignoring");
+        return;
+    }
+
+    /* Skip if already dirty or not clean (avoid redundant processing) */
+    if (dm->state != DOC_STATE_CLEAN) {
+        g_debug("DocumentManager buffer changed but state is not CLEAN - ignoring");
+        return;
+    }
+
+    /* Cancel any existing debounce timer */
+    if (dm->debounce_id > 0) {
+        g_source_remove(dm->debounce_id);
+        dm->debounce_id = 0;
+    }
+
+    /* Start debounce timer to coalesce rapid changes */
+    dm->debounce_id = g_timeout_add(DEBOUNCE_INTERVAL_MS, debounce_timeout_cb, dm);
+    g_debug("DocumentManager buffer changed: started debounce timer (%dms)", DEBOUNCE_INTERVAL_MS);
+}
+
+static gboolean debounce_timeout_cb(gpointer user_data)
+{
+    DocumentManager *dm = user_data;
+    g_return_val_if_fail(dm != NULL, G_SOURCE_REMOVE);
+
+    /* Clear the debounce timer ID since it's about to be removed */
+    dm->debounce_id = 0;
+
     /* Check if there's a pending user change that should trigger dirty state */
-    gboolean user_change_pending = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(buffer),
-                                                                     "gtktext-user-change-pending")) != 0;
+    gboolean user_change_pending = render_get_user_change_pending(dm->buffer);
 
     /* Update state to dirty if not already and initialization is complete */
     if (dm->state == DOC_STATE_CLEAN && dm->initialization_complete) {
         /* Force dirty state if user change is pending, or check content change normally */
         if (user_change_pending || has_content_changed(dm)) {
-            g_debug("DocumentManager buffer changed: setting to DIRTY (user_change_pending=%s)",
+            g_debug("DocumentManager debounced buffer change: setting to DIRTY (user_change_pending=%s)",
                    user_change_pending ? "TRUE" : "FALSE");
             set_document_state(dm, DOC_STATE_DIRTY);
         }
-    } else if (!dm->initialization_complete) {
-        g_debug("DocumentManager buffer changed during initialization - ignoring");
     }
+
+    return G_SOURCE_REMOVE;
+}
+
+static void on_autosave_complete(GObject *source_object, GAsyncResult *result, gpointer user_data)
+{
+    (void)source_object; /* Unused parameter */
+    DocumentManager *dm = user_data;
+    g_return_if_fail(dm != NULL);
+
+    GError *error = NULL;
+    if (!document_manager_save_finish(dm, result, &error)) {
+        g_warning("Autosave failed: %s", error ? error->message : "Unknown error");
+        g_clear_error(&error);
+    } else {
+        g_debug("Autosave completed successfully");
+    }
+
+    /* Reset the in-progress flag */
+    dm->autosave_in_progress = FALSE;
 }
 
 static gboolean autosave_timeout_cb(gpointer user_data)
 {
     DocumentManager *dm = user_data;
     g_return_val_if_fail(dm != NULL, G_SOURCE_REMOVE);
-    
+
     /* Only autosave if dirty and not currently saving */
-    if (dm->state == DOC_STATE_DIRTY) {
+    if (dm->state == DOC_STATE_DIRTY && !dm->autosave_in_progress) {
         g_debug("Performing autosave");
-        
+
+        /* Set in-progress flag to prevent concurrent autosaves */
+        dm->autosave_in_progress = TRUE;
+
         /* For untitled documents, save as draft */
         if (dm->is_untitled) {
             g_autoptr(GError) error = NULL;
             if (!document_manager_save_draft(dm, &error)) {
-                g_warning("Autosave draft failed: %s", 
+                g_warning("Autosave draft failed: %s",
                          error ? error->message : "Unknown error");
             }
+            /* Reset flag for draft saves (synchronous) */
+            dm->autosave_in_progress = FALSE;
         } else {
-            /* For named documents, save in place using async API */
-            document_manager_save_async(dm, NULL, NULL, NULL);
+            /* For named documents, save in place using async API with callback */
+            document_manager_save_async(dm, NULL, on_autosave_complete, dm);
         }
     }
     
@@ -1028,6 +1147,17 @@ static void document_manager_open_async_complete(GObject *source_object, GAsyncR
 
     /* Get file contents from async operation */
     if (!g_file_load_contents_finish(file, result, &contents, &length, NULL, &error)) {
+        /* Show error status */
+        if (dm->window) {
+            GtkApplication *app = gtk_window_get_application(dm->window);
+            if (app) {
+                status_manager_update_async_operation(app, _("Opening"), data->file_path, FALSE);
+                g_autofree gchar *error_msg = g_strdup_printf(_("Failed to open %s"),
+                                                            g_path_get_basename(data->file_path));
+                status_manager_show_toast(app, error_msg, 4);
+            }
+        }
+
         /* Map GIO errors to our domain */
         if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
             g_task_return_new_error(task, GTKTEXT_DOCUMENT_ERROR, GTKTEXT_DOCUMENT_ERROR_NOT_FOUND,
@@ -1053,7 +1183,7 @@ static void document_manager_open_async_complete(GObject *source_object, GAsyncR
     document_manager_block_buffer_signals(dm);
 
     /* Suppress markdown parsing during file loading to prevent automatic formatting */
-    g_object_set_data(G_OBJECT(dm->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(1));
+    render_set_suppress_reparse(dm->buffer, TRUE);
 
     /* Clear current buffer and load new content */
     GtkTextIter start, end;
@@ -1065,7 +1195,7 @@ static void document_manager_open_async_complete(GObject *source_object, GAsyncR
     theme_styles_update_theme_dependent_tags(dm->buffer);
 
     /* Re-enable markdown parsing after loading is complete */
-    g_object_set_data(G_OBJECT(dm->buffer), "gtktext-suppress-reparse", GINT_TO_POINTER(0));
+    render_set_suppress_reparse(dm->buffer, FALSE);
 
     /* Update document state */
     g_free(dm->file_path);
@@ -1088,6 +1218,20 @@ static void document_manager_open_async_complete(GObject *source_object, GAsyncR
 
     /* Unblock buffer change signals */
     document_manager_unblock_buffer_signals(dm);
+
+    /* Finalize initialization to enable buffer change detection */
+    document_manager_finalize_initialization(dm);
+
+    /* Show success status */
+    if (dm->window) {
+        GtkApplication *app = gtk_window_get_application(dm->window);
+        if (app) {
+            status_manager_update_async_operation(app, _("Opening"), data->file_path, FALSE);
+            g_autofree gchar *success_msg = g_strdup_printf(_("Opened %s"),
+                                                          g_path_get_basename(data->file_path));
+            status_manager_show_toast(app, success_msg, 3);
+        }
+    }
 
     g_debug("Async file opened successfully: %s", data->file_path);
     g_free(contents);
@@ -1121,6 +1265,14 @@ void document_manager_open_async(DocumentManager *dm, const gchar *file_path,
         return;
     }
 
+    /* Show loading status */
+    if (dm->window) {
+        GtkApplication *app = gtk_window_get_application(dm->window);
+        if (app) {
+            status_manager_update_async_operation(app, _("Opening"), file_path, TRUE);
+        }
+    }
+
     /* Start async file loading */
     g_file_load_contents_async(file, cancellable, document_manager_open_async_complete, task);
     g_object_unref(file);
@@ -1146,6 +1298,17 @@ static void document_manager_save_async_complete(GObject *source_object, GAsyncR
 
     /* Check save result */
     if (!g_file_replace_contents_finish(file, result, NULL, &error)) {
+        /* Show error status */
+        if (dm->window) {
+            GtkApplication *app = gtk_window_get_application(dm->window);
+            if (app) {
+                status_manager_update_async_operation(app, _("Saving"), dm->file_path, FALSE);
+                g_autofree gchar *error_msg = g_strdup_printf(_("Failed to save %s"),
+                                                            g_path_get_basename(dm->file_path));
+                status_manager_show_toast(app, error_msg, 4);
+            }
+        }
+
         /* Map GIO errors to our domain */
         if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) {
             g_task_return_new_error(task, GTKTEXT_DOCUMENT_ERROR, GTKTEXT_DOCUMENT_ERROR_READONLY,
@@ -1200,6 +1363,20 @@ static void document_manager_save_async_complete(GObject *source_object, GAsyncR
     dm->is_untitled = FALSE;
     set_document_state(dm, DOC_STATE_CLEAN);
 
+    /* Finalize initialization to ensure buffer change detection is active */
+    document_manager_finalize_initialization(dm);
+
+    /* Show success status */
+    if (dm->window) {
+        GtkApplication *app = gtk_window_get_application(dm->window);
+        if (app) {
+            status_manager_update_async_operation(app, _("Saving"), dm->file_path, FALSE);
+            g_autofree gchar *success_msg = g_strdup_printf(_("Saved %s"),
+                                                          g_path_get_basename(dm->file_path));
+            status_manager_show_toast(app, success_msg, 3);
+        }
+    }
+
     g_debug("Async save completed: %s", dm->file_path);
 
     /* Return success */
@@ -1241,6 +1418,14 @@ void document_manager_save_async(DocumentManager *dm, GCancellable *cancellable,
 
     /* Set saving state */
     set_document_state(dm, DOC_STATE_SAVING);
+
+    /* Show saving status */
+    if (dm->window) {
+        GtkApplication *app = gtk_window_get_application(dm->window);
+        if (app) {
+            status_manager_update_async_operation(app, _("Saving"), dm->file_path, TRUE);
+        }
+    }
 
     /* Start async file save */
     GFile *file = g_file_new_for_path(dm->file_path);
@@ -1575,6 +1760,9 @@ gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar 
     /* Unblock buffer signals after adoption is complete */
     document_manager_unblock_buffer_signals(dm);
 
+    /* Finalize initialization to enable buffer change detection */
+    document_manager_finalize_initialization(dm);
+
     g_debug("Adopted current buffer for file: %s", file_path);
     return TRUE;
 }
@@ -1870,7 +2058,7 @@ void document_manager_update_baseline(DocumentManager *dm)
     g_debug("DocumentManager baseline updated to current buffer content - state set to CLEAN");
 }
 
-void document_manager_finalize_initialization(DocumentManager *dm)
+static void document_manager_finalize_initialization(DocumentManager *dm)
 {
     g_return_if_fail(dm != NULL);
 

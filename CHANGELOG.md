@@ -17,6 +17,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [2.0.0] - 2025-09-20
+
+**MAJOR RELEASE: Phase 3 - Clean API Surface & Conflict Resolution**
+
+This major release completes the async-first architecture migration with clean public APIs, external change conflict resolution, and comprehensive typed render helpers.
+
+### Removed (Breaking Changes)
+- **Deprecated Sync APIs**: Permanently removed legacy synchronous document operations
+  - `document_manager_open_file()` - Use `document_manager_open_async()` instead
+  - `document_manager_save()` - Use `document_manager_save_async()` instead
+  - `document_manager_save_as()` - Use `document_manager_save_as_async()` instead
+  - `document_manager_open_file_with_content()` - Use `document_manager_adopt_current_buffer()` instead
+  - `document_manager_set_state_callback()` - Use `g_signal_connect(dm, "state-changed", ...)` instead
+
+### Added
+- **External Change Conflict Dialog**: Non-blocking conflict resolution with user choice
+  - AdwAlertDialog-based conflict prompt with "Keep My Version" and "Reload from File" options
+  - Automatic conflict detection through file monitoring
+  - Integrated with DocumentManager's `document_manager_resolve_conflict()` API
+  - Prepared infrastructure for future merge tool integration
+- **Typed Render Helpers**: Type-safe replacements for string-based g_object_data
+  - `render_set_suppress_reparse()` / `render_get_suppress_reparse()` - Control markdown parsing
+  - `render_set_user_change_pending()` / `render_get_user_change_pending()` - Track user changes
+  - RAII helper `with_suppress_reparse(buffer) { ... }` for scoped operations
+  - Enhanced type safety and code clarity throughout rendering pipeline
+
+### Changed
+- **DocumentManager Internalization**: Simplified public API surface
+  - `document_manager_finalize_initialization()` now called automatically during open/save operations
+  - `document_manager_adopt_current_buffer()` handles initialization internally
+  - Reduced external API complexity while maintaining full functionality
+- **String-based Data Elimination**: Replaced all stringly-typed buffer metadata
+  - Migrated `"gtktext-suppress-reparse"` to typed `render_set_suppress_reparse()`
+  - Migrated `"gtktext-user-change-pending"` to typed `render_set_user_change_pending()`
+  - Enhanced code maintainability and reduced runtime string comparisons
+
+### Technical Details
+- **Clean Public API**: DocumentManager auto-updates baseline after open/save operations
+- **Signal-Only Architecture**: External components interact via GObject signals rather than callbacks
+- **Conflict Resolution Flow**:
+  1. File monitor detects external changes
+  2. DocumentManager sets CONFLICT state
+  3. Non-blocking AdwAlertDialog presents user options
+  4. Choice resolved through `document_manager_resolve_conflict()`
+- **Type Safety**: All render state management now uses compile-time checked functions
+- **Async-First**: All I/O operations use async APIs with proper error handling
+
+### Migration Guide
+- Replace deprecated sync APIs with their async equivalents
+- Use `g_signal_connect()` for DocumentManager state changes
+- External change conflicts now automatically prompt users with resolution dialog
+- No action required for render helpers - migration handled internally
+
+This release establishes a clean, async-first API surface ready for production use with comprehensive conflict resolution and zero legacy API dependencies.
+
 ## [1.6.0] - 2025-09-19
 
 ### Changed

@@ -90,38 +90,16 @@ void document_manager_save_as_async(DocumentManager *dm, const gchar *file_path,
 gboolean document_manager_save_as_finish(DocumentManager *dm, GAsyncResult *result,
                                         GError **error);
 
-/* Document operations - Legacy sync APIs (deprecated) */
-G_GNUC_DEPRECATED_FOR(document_manager_open_async)
+/* Document operations - Legacy sync APIs (temporarily restored for migration) */
 gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
                                    GError **error);
-
-G_GNUC_DEPRECATED_FOR(document_manager_save_async)
 gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog,
                               SaveCompleteCallback callback, gpointer user_data);
-G_GNUC_DEPRECATED_FOR(document_manager_save_as_async)
 gboolean document_manager_save_as(DocumentManager *dm, const gchar *file_path,
                                  SaveCompleteCallback callback, gpointer user_data);
 
-/* Internal/special use APIs */
-gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar *file_path,
-                                               GError **error);
-
-/* Deprecated shim: kept for compatibility; use document_manager_adopt_current_buffer */
-G_GNUC_DEPRECATED_FOR(document_manager_adopt_current_buffer)
-gboolean document_manager_open_file_with_content(DocumentManager *dm, const gchar *file_path,
-                                                const gchar *content, GError **error);
-void document_manager_start_autosave(DocumentManager *dm);
-void document_manager_stop_autosave(DocumentManager *dm);
-void document_manager_update_autosave_setting(DocumentManager *dm);
-
 /* State management */
 DocumentState document_manager_get_state(DocumentManager *dm);
-
-/* Deprecated: Use g_signal_connect(dm, "state-changed", callback, user_data) instead */
-G_GNUC_DEPRECATED_FOR(g_signal_connect)
-void document_manager_set_state_callback(DocumentManager *dm,
-                                        StateChangeCallback callback,
-                                        gpointer user_data);
 gboolean document_manager_has_unsaved_changes(DocumentManager *dm);
 const gchar* document_manager_get_file_path(DocumentManager *dm);
 const gchar* document_manager_get_display_name(DocumentManager *dm);
@@ -133,7 +111,15 @@ void document_manager_unblock_buffer_signals(DocumentManager *dm);
 
 /* Content synchronization */
 void document_manager_update_baseline(DocumentManager *dm);
-void document_manager_finalize_initialization(DocumentManager *dm);
+
+/* Autosave management - temporarily kept for Phase 3 migration */
+void document_manager_start_autosave(DocumentManager *dm);
+void document_manager_stop_autosave(DocumentManager *dm);
+void document_manager_update_autosave_setting(DocumentManager *dm);
+
+/* Content adoption - allows associating existing buffer content with file path */
+gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar *file_path,
+                                               GError **error);
 
 /* Recovery and drafts */
 gboolean document_manager_save_draft(DocumentManager *dm, GError **error);
