@@ -13,7 +13,7 @@ render_sources += files(
 
 # Image rendering modules
 render_sources += files(
-  'images/image-widget.c',
+  'images/image_widget.c',
   'images/http_images.c'
 )
 

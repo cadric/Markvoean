@@ -1,4 +1,4 @@
-/* [0.2.0] - 2025-09-15 - include/gtktext/image-widget.h
+/* [0.2.1] - 2025-09-28 - include/gtktext/image_widget.h
  * Added: GObject type system for image widget management.
  */
 

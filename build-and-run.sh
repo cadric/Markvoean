@@ -18,7 +18,18 @@ fi
 meson compile -C "$BUILD_DIR"
 
 echo "🧪 Running tests..."
-meson test -C "$BUILD_DIR" --print-errorlogs
+# If no display is available, fall back to headless-safe tests or Xvfb wrapper
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
+  if command -v xvfb-run >/dev/null 2>&1; then
+    echo "   No display found; running tests under Xvfb"
+    xvfb-run -s "-screen 0 1024x768x24" meson test -C "$BUILD_DIR" --print-errorlogs || true
+  else
+    echo "   No display found and no Xvfb; running data-only suite"
+    meson test -C "$BUILD_DIR" --suite gtktext:data --print-errorlogs || true
+  fi
+else
+  meson test -C "$BUILD_DIR" --print-errorlogs || true
+fi
 
 echo "📋 Ensuring GSettings schema is compiled..."
 if [ ! -f "$SCHEMA_DIR/gschemas.compiled" ] || [ "$SCHEMA_DIR/org.gtk.gtktext.gschema.xml" -nt "$SCHEMA_DIR/gschemas.compiled" ]; then

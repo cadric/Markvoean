@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [2.5.13] - 2025-09-28
+
+### Hardening & Docs (Phase 6)
+- Warnings: raised Meson `warning_level` to 3; `-Dwerror=true` enforced in CI.
+- Static analysis: added `.clang-tidy` and helper scripts `scripts/clang-tidy.sh` and `scripts/iwyu.sh`.
+- CI: added GitHub Actions workflow to build, run data tests, run clang-tidy/IWYU (non-fatal), and attempt full tests under Xvfb.
+- Headless tests: added `scripts/test-headless.sh` for local headless runs.
+- Tests: introduced a non-GUI export test (test_export.c) for Markdown export logic (does not run by default in data-only suite).
+- Documentation: added `docs/CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, and updated README structure.
+
 ## [2.5.12] - 2025-09-28
 
 ### Build/Layout (Phase 5 kick-off)

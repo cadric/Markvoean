@@ -6,7 +6,7 @@
  * Added: GObject type system implementation for image widget management.
  */
 #include "config.h"
-#include <gtktext/render/image-widget.h>
+#include <gtktext/render/image_widget.h>
 #include <glib-object.h>
 
 /* ========== META ========== */

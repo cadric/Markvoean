@@ -1,235 +1,130 @@
-## 📋 PRE‑EDIT CHECKLIST
+# Codex Agent – Minimal Engineering Context
 
-**Mandatory before any change**
+## Project Constraints
 
-- Read this file end‑to‑end.
-- Build, run, test locally.
-- No main‑loop blocking, no new warnings.
-- Update version + changelog.
-- KISS principle
+* Language/stack: **C23** (idiomatic) with **GLib/GObject** only.
+* Platform: **GTK 4**, **libadwaita**, Wayland-first, Flatpak-friendly.
+* UX: GNOME HIG patterns; dark mode follows system (no theme overrides).
+* Safety: explicit ownership; predictable lifetimes; hardened builds.
 
----
+## Non‑Negotiable Rules
 
-## 🧭 Guiding Principles
+* **Never block UI** (no sync I/O on main loop).
+* Use **GLib main loop** only; no alt event loops.
+* **No raw libc** where GLib exists (`malloc/strcpy/sprintf/system`, etc.).
+* **No global mutable state** (prefer instances; justify singletons).
+* **No deprecated APIs** (GTK4/libadwaita only).
 
-1. **Simplicity**: idiomatic C23 + GLib/GObject only.
-2. **GNOME‑first UX**: HIG + libadwaita patterns.
-3. **Safety**: explicit ownership, predictable lifetimes, hardened builds.
-4. **Modern only**: GTK 4, Wayland focus, Flatpak‑friendly.
-5. **Accessibility**: keyboard, AT‑SPI, contrast, i18n.
-6. **Documentation**: Keep docs current and accurate.
----
+## Versioning & Workflow (SemVer)
 
-## ⚠️ Prohibited Practices
+* PATCH: fixes/refactors/docs · MINOR: features/public API/new strings · MAJOR: breaking/migrations.
+* Each change must: bump `project(version:)` in `meson.build`; update `CHANGELOG.md` (date + SemVer); keep AppStream in sync if user-visible.
+* Commits: Conventional (`feat:`, `fix:`, `refactor:` …), imperative, ≤72 chars.
+* Pre‑commit gate: builds clean, tests pass, static analysis clean/justified, **no leaks**, **no UI blocking**, version + changelog updated.
+* Release: CI green → update AppStream notes → sign tag `vX.Y.Z` → attach Flatpak bundle or tarball.
 
-- ❌ Block UI thread (no sync I/O).
-- ❌ Leak refs or memory (always unref/free).
-- ❌ Raw libc when GLib exists (`malloc/strcpy/sprintf/system`).
-- ❌ Override Adwaita theme.
-- ❌ Deprecated APIs (check GTK4/libadwaita docs).
-- ❌ Non‑GLib event loops (use GLib main loop).
-- ❌ Global mutable state (prefer instances; justify singletons).
+## Build & Tooling
 
----
+* Meson ≥1.7; pkg-config: `gtk4`, `libadwaita-1`, `libcmark` (opt: `libsoup-3.0`).
+* Defaults: `c_std=c23`, `warning_level=2`, `werror=false` (CI enforces `-Werror`), `optimization=2`, PIE, RELRO, canaries.
+* Hardening flags: `-D_FORTIFY_SOURCE=2`, `-fstack-protector-strong`, link `-Wl,-z,relro -Wl,-z,now -pie`.
+* Tools: clang-format (CI), clang-tidy/scan-build (recommended).
+* Common commands: `meson setup builddir && meson compile -C builddir && meson test -C builddir --print-errorlogs && meson install -C builddir`.
 
-## 🔄 Version Control & Workflow
+## Code Standards
 
-**SemVer** in `meson.build` → `project(version:)`; mirror in AppStream.
+* Require `__STDC_VERSION__ == 202311L`; no VLAs.
+* Use C23 checked-int macros (`ckd_add`/`ckd_sub`/`ckd_mul`).
+* Naming: `snake_case`; lines ≤100 chars; structured logs only (no PII).
+* UI single-threaded; CPU/I/O offloaded; marshal back via GLib.
+* Errors: explicit codes or `GError **out`; never `exit()` for recoverables.
 
-**Bumps**: PATCH = fixes/refactors/docs; MINOR = features/public API/new strings; MAJOR = breaking API/migrations/removed features. Default to PATCH.
-
-**Artifacts per change**
-
-1. Update `meson.build` version. 2) Update `CHANGELOG.md` (date + SemVer). 3) Per‑file header note. 4) If schemas: bump, recompile, note migration. 5) If UI changed: short before/after note or screenshot link. 6) If new features: update AppStream metainfo.xml releases section.
-
-**Commit style**: Conventional Commits (`feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`). Imperative, ≤72 chars.
-
-**Pre‑commit**: builds clean, tests pass, static analysis clean or justified, no UI blocking, no leaks (ASan/Valgrind on touched paths), version + changelog updated.
-
-**Release**: CI green → update AppStream notes → tag `vX.Y.Z` (signed) → produce Flatpak bundle or tarball and attach.
-
----
-
-## 📐 Code Standards (C, GLib, GObject)
-
-### C23 (GLib/GObject)
-
-* Require `__STDC_VERSION__ == 202311L`. Use `-std=c23` or `-std=gnu23`.
-* No VLAs on stack; use fixed sizes or heap.
-* Use C23 checked integer macros (`ckd_add`, `ckd_sub`, `ckd_mul`).
-* Structured logs only. No PII.
-* Single‑threaded UI; I/O may be threaded.
-* `snake_case`, lines ≤ 100 chars.
-* Event loop: GLib main loop (`GMainContext`/`GMainLoop`); no libuv/libevent.
-* Error handling: explicit codes or GError‑style out params. No `exit()` on recoverable errors.
-* Hardening: debug with ASan/UBSan; release with PIE, full RELRO, stack canaries, optional LTO.
-
-**Minimal C module**
+### Minimal C module template
 
 ```c
-/*
- * Module: [module_name.c]
- * Purpose: [One-line description]
- */
 #include <glib.h>
-#include <stddef.h>
 #include <stdbool.h>
 
-static int helper_function(void);
+static int helper(void);
 
 int module_init(void) { return 0; }
-
-void module_update(GMainContext *context) {
-  (void)context;
-}
-
+void module_update(GMainContext *ctx) { (void)ctx; }
 void module_shutdown(void) {}
-
-static int helper_function(void) { return 1; }
+static int helper(void) { return 1; }
 ```
 
----
+## UI Patterns (GTK/libadwaita)
 
-## 🎨 UI, HIG, libadwaita
+* Build UI in **GtkBuilder .ui**; wire logic in C.
+* Skeleton: `AdwApplication → AdwApplicationWindow → AdwToolbarView + AdwHeaderBar`.
+* Provide accelerators + shortcuts window; respect spacing/typography; primary action right.
+* Do not hardcode colors; follow Adwaita.
 
-- Build UI with GtkBuilder .ui; wire logic in C.
-- Base: AdwApplication → AdwApplicationWindow → AdwToolbarView + AdwHeaderBar.
-- Respect platform spacing/typography; primary action right, cancel left.
-- Provide accelerators + shortcuts window.
-- Support dark mode automatically; never hardcode palette.
-
-### GtkBuilder ultra‑min
+### Minimal GtkBuilder template
 
 ```xml
 <interface>
   <requires lib="gtk" version="4.0"/>
   <template class="MyWindow" parent="AdwApplicationWindow">
-    <child><object class="AdwToolbarView">
-      <child type="top"><object class="AdwHeaderBar" id="header"/></child>
-      <child><object class="GtkBox" id="content" orientation="vertical"/></child>
-    </object></child>
+    <child>
+      <object class="AdwToolbarView">
+        <child type="top"><object class="AdwHeaderBar" id="header"/></child>
+        <child><object class="GtkBox" id="content" orientation="vertical"/></child>
+      </object>
+    </child>
   </template>
 </interface>
 ```
 
----
+## I/O & Concurrency
 
-## ♿ Accessibility & i18n
+* No sync I/O in UI; use `*_async`/`*_finish` or `GTask`.
+* Debounce/coalesce bursty updates.
+* Worker threads for heavy CPU; marshal results to main thread.
 
-- Accessible names/roles/relations; update via `gtk_accessible_update_property()`.
-- Full keyboard navigation; verify focus order and visible focus.
-- Avoid color‑only cues; meet WCAG AA contrast.
-- Wrap user strings in `_()`; use `ngettext()` for plurals.
-- Mark translatable strings in `.ui` files.
+## Accessibility & i18n
 
----
+* Meaningful accessible names/roles/relations; verify focus order and visible focus.
+* No color‑only cues; meet WCAG AA.
+* Wrap strings in `_()`; plurals via `ngettext()`; mark translatables in `.ui`.
 
-## ⚙️ Build & Tooling
+## Testing
 
-- Build: Meson 1.7+ + Ninja. pkg-config: `gtk4`, `libadwaita-1`, `libcmark`; optional `libsoup-3.0`.
-- Defaults: `c_std=c23`, `warning_level=2`, `werror=false` (CI enforces `-Werror`), `optimization=2`, `b_pie=true`, `b_lto=false`, `buildtype=release`.
-- Hardening: `-D_FORTIFY_SOURCE=2`, `-fstack-protector-strong`, link `-Wl,-z,relro -Wl,-z,now -pie`; define `HAVE_CONFIG_H`.
-- Analysis: clang-tidy, scan-build, optional cppcheck.
-- Format: clang-format enforced in CI.
+* GLib test framework; deterministic, headless.
+* Cover parsing, transforms, error paths.
+* Run ASan/UBSan or Valgrind on changed paths.
 
-### Commands
+## Security
 
-```bash
-meson setup builddir
-meson compile -C builddir
-meson test -C builddir --print-errorlogs
-meson install -C builddir
-```
+* Use **GIO** for file/process ops; **never** `system()`.
+* Use Flatpak portals for file/open‑uri/settings.
+* Temp files: `g_file_new_tmp()` / `g_mkstemp_full()`.
+* Validate/sanitize all external input; never execute user data.
 
-### Meson snippet
+## Packaging
 
-```meson
-project('gtktext','c',
-  version: '2.5.11',
-  meson_version: '>= 1.7.2',
-  default_options: [
-    'c_std=c23',
-    'warning_level=2',
-    'werror=false',
-    'optimization=2',
-    'b_pie=true',
-    'b_lto=false',
-    'buildtype=release'
-  ]
-)
+* Clean build, no warnings; tests pass.
+* AppStream + desktop validated (`appstream-cli`); icons/categories correct.
+* Tag and publish; attach Flatpak bundle or source tarball.
 
-add_project_arguments([
-  '-DHAVE_CONFIG_H',
-  '-D_FORTIFY_SOURCE=2',
-  '-fstack-protector-strong'
-], language: 'c')
+## MR/PR Checklist (submitter & reviewer)
 
-add_project_link_arguments([
-  '-Wl,-z,relro',
-  '-Wl,-z,now',
-  '-pie'
-], language: 'c')
-```
+* HIG followed; GtkBuilder UI; shortcuts discoverable.
+* No main‑loop blocking; no new globals; ownership rules respected.
+* i18n + accessibility verified.
+* AppStream/desktop validation pass; reverse‑DNS app ID consistent.
+* Hardening flags intact; **tests pass; no leaks**.
+* Changelog/docs updated for user‑visible changes.
 
----
+## AI Assistant Notes
 
-## 🔌 I/O & Concurrency
+* Keep diffs minimal and scoped; explain rationale and UI notes in commits.
+* Follow GObject ownership conventions.
+* Propose tests with features/fixes; add precise TODOs/questions if uncertain.
 
-- No sync I/O in UI code; use `*_async`/`*_finish` or `GTask`.
-- Debounce bursty handlers; coalesce updates.
-- Worker threads for CPU heavy; marshal back to main thread.
+## Do Not Use
 
----
-
-## 🧪 Testing
-
-- GLib test framework; deterministic, headless.
-- Test parsing, transforms, error paths.
-- Run ASan/UBSan or Valgrind on changed paths.
-- CI: `meson test --print-errorlogs`.
-
----
-
-## 🔒 Security
-
-- Use GIO for file/process ops; never `system()` in core.
-- Use Flatpak portals for file/open‑uri/settings.
-- Create temp files via `g_file_new_tmp()`/`g_mkstemp_full()`.
-- Validate/sanitize all external input; never execute user data.
-- For tests, set `GIO_USE_VFS` as needed; avoid host paths in Flatpak.
----
-## 📦 Packaging & Releases
-
-1. Clean build, no warnings, tests pass. 2) Update AppStream notes and desktop file if needed. 3) Validate with appstream‑cli; verify icons/categories. 4) Tag and publish; attach Flatpak bundle or source tarball.
-
----
-
-## ✅ MR/PR Review Checklist
-
-- HIG followed; GtkBuilder UI.
-- No main‑loop blocking; no new global mutable state.
-- Shortcuts present and discoverable.
-- i18n + accessibility verified.
-- AppStream metainfo.xml and desktop file validation pass.
-- Consistent reverse-DNS application ID across all files.
-- Hardening flags intact; no new warnings; tests pass; no leaks.
-- Docs + changelog updated for user‑visible changes.
-
----
-
-## 🧭 AI Assistant Playbook
-
-- Obey this file; keep diffs minimal and scoped.
-- Explain changes in commits; include rationale and UI notes.
-- Follow GObject ownership rules.
-- Propose tests with features/fixes.
-- If uncertain, add a precise TODO or question in MR.
-
----
-
-## 🗑️ Deprecated / Do Not Use
-
-- GTK 3 or X11‑only APIs.
-- Deprecated GTK 4 widgets or libadwaita features.
-- Direct theme overrides that fight Adwaita.
-- Raw libc string/memory APIs where GLib offers safer options.
+* GTK 3, X11‑only APIs.
+* Deprecated GTK4/libadwaita widgets/features.
+* Theme overrides fighting Adwaita.
+* Raw libc string/memory APIs when GLib alternatives exist.

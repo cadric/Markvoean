@@ -16,7 +16,7 @@ lib_sources = [
   '../src/render/visual/theme_styles.c',
   '../src/render/visual/hr_widget.c',
   '../src/render/safe_helpers.c',
-  '../src/render/images/image-widget.c',
+  '../src/render/images/image_widget.c',
   '../src/render/images/http_images.c',
   '../src/components/toolbar/toolbar.c',
   '../src/core/settings.c',
@@ -59,7 +59,8 @@ gtktext_lib = static_library('gtktext_test',
 test_sources = [
   'test_lists.c',
   'test_async_document.c',
-  'test_doc_state.c'
+  'test_doc_state.c',
+  'test_export.c'
 ]
 
 # Set up test environment with GSettings schema directory
@@ -67,6 +68,7 @@ test_env = environment()
 test_env.set('GSETTINGS_SCHEMA_DIR', meson.current_source_dir() + '/../data')
 # Enforce Wayland-only policy as per CLAUDE.md guidelines
 test_env.set('GDK_BACKEND', 'wayland')
+test_env.set('GSETTINGS_BACKEND', 'memory')
 
 # Create test executables
 foreach test_src : test_sources

@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy include-what-you-use xvfb
+      - name: Configure (C23, Werror)
+        run: meson setup builddir -D c_std=c23 -D werror=true
+      - name: Build
+        run: meson compile -C builddir
+      - name: Data tests (headless safe)
+        run: meson test -C builddir --suite gtktext:data --print-errorlogs
+      - name: Run clang-tidy (non-fatal)
+        run: ./scripts/clang-tidy.sh || true
+      - name: Run IWYU (non-fatal)
+        run: ./scripts/iwyu.sh || true
+      - name: Full tests under Xvfb (optional)
+        run: xvfb-run -s "-screen 0 1024x768x24" meson test -C builddir --print-errorlogs || true
+

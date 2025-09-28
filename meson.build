@@ -2,11 +2,11 @@
 # Fixed: Copy/cut operations now preserve markdown formatting instead of plain text
 
 project('gtktext', 'c',
-  version: '2.5.12',
+  version: '2.5.13',
   meson_version: '>= 1.7.2',
   default_options: [
     'c_std=c23',
-    'warning_level=2',
+    'warning_level=3',
     'werror=false',
     'optimization=2',
     'b_pie=true',

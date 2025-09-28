@@ -63,35 +63,32 @@ meson test -C builddir
 ## Project Structure
 
 ```
-gtktext/
-├── src/                # All C source files (.c)
-│   ├── main.c
-│   ├── toolbar.c
-│   ├── cmark.c
-│   └── settings.c
-├── include/            # All header files (.h)
-│   ├── toolbar.h
-│   ├── cmark.h
-│   └── settings.h
-├── ui/                 # GtkBuilder .ui files
-│   └── main_window.ui
-├── po/                 # Translation files
-├── tests/              # Unit tests
-│   └── test_cmark.c
 ```
-gtktext/
-├── src/                # Source code
-├── include/            # Header files
-├── ui/                 # GTK UI files (.ui)
-├── data/               # App icons, .desktop files, GSettings schema
-│   └── icons/
-├── tests/              # Test files
-├── scripts/            # Helper scripts
-├── builddir/           # Meson build directory
-├── meson.build         # Main build configuration
-├── build-and-run.sh    # Quick build, test, and run script
-├── build.sh            # Quick build script
-├── run.sh              # Quick run script
+.
+├── include/gtktext/         # Public headers (installed)
+│   ├── core/                # App/core public APIs
+│   ├── document/            # Document manager + state public APIs
+│   ├── render/              # Rendering public APIs (cmrender, tag_manager, image_widget, etc.)
+│   └── ui/                  # UI-facing helper APIs
+├── src/                     # Implementation (.c) and private internals
+│   ├── core/
+│   ├── document/
+│   │   └── internal/        # Private headers (not installed)
+│   ├── render/
+│   │   ├── markdown/
+│   │   ├── images/
+│   │   └── visual/
+│   └── ui/
+├── ui/                      # GtkBuilder .ui files
+├── data/                    # .desktop, metainfo, GSettings schema, icons
+├── tests/                   # Unit/integration tests (Meson)
+├── scripts/                 # Helper scripts
+├── builddir/                # Meson build directory (generated)
+├── meson.build              # Root Meson configuration
+├── src/meson.build          # Source Meson (aggregates subdirs)
+├── build-and-run.sh         # Build + test + run helper
+├── build.sh                 # Build helper
+├── run.sh                   # Run helper
 └── README.md
 ```
 
