@@ -5,6 +5,8 @@
    Created: Extracted core event handlers from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_UI_EVENT_HANDLERS_H
 #define GTKTEXT_UI_EVENT_HANDLERS_H
 

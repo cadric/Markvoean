@@ -5,6 +5,8 @@
    Changed: Extracted app actions from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_UI_APP_ACTIONS_H
 #define GTKTEXT_UI_APP_ACTIONS_H
 
@@ -21,6 +23,7 @@ G_BEGIN_DECLS
 void app_action_preferences_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void app_action_about_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void app_action_shortcuts_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+void app_action_print_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void app_action_quit_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
 G_END_DECLS

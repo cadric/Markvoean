@@ -11,10 +11,13 @@
 
 #include <gtktext/document/document_manager.h>
 #include <gtktext/document/doc_state.h>
+#include "internal/document_manager_priv.h"
+#include "internal/recovery_priv.h"
 #include <gtktext/render/cmrender.h>
 #include <gtktext/render/theme_styles.h>
 #include <gtktext/render/markdown/markdown_engine.h>
 #include <gtktext/ui/dialogs.h>
+#include "internal/external_changes.h"
 #include <gtktext/ui/status_manager.h>
 #include <gtktext/core/util.h>
 #include <gtk/gtk.h>
@@ -35,39 +38,7 @@
  * TYPES - Internal type definitions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-/* GObject implementation */
-struct _GtktextDocumentManager {
-    GObject parent_instance;
-    /* Core references */
-    GtkTextBuffer *buffer;           /* ref - the text buffer */
-    GtkWindow *window;               /* ref - parent window */
-    
-    /* State */
-    DocState doc_state;              /* New hash-based state tracking */
-    gchar *file_path;                /* owned - current file location */
-    gchar *draft_path;               /* owned - draft location for untitled */
-    gchar *recovery_path;            /* owned - crash recovery journal */
-    gint64 last_mtime;               /* last known modification time */
-    gchar *last_hash;                /* owned - content hash for conflict detection */
-    gboolean is_untitled;
-    gboolean initialization_complete; /* owned - prevents premature dirty state during setup */
-    
-    /* Timers and monitoring */
-    guint autosave_id;               /* autosave timer source ID */
-    guint recovery_id;               /* recovery snapshot timer source ID */
-    guint debounce_id;               /* buffer change debounce timer source ID */
-    gboolean autosave_in_progress;   /* flag to prevent concurrent autosave operations */
-    GFileMonitor *file_monitor;      /* ref - file change monitor */
-    GSettings *settings;             /* ref - app settings for autosave control */
-    
-    /* Callbacks */
-    StateChangeCallback state_callback;
-    gpointer state_callback_data;
-    
-    /* Buffer change tracking */
-    gulong buffer_changed_handler_id;
-    gchar *original_content;         /* owned - content at last save */
-};
+/* GObject implementation struct moved to internal/document_manager_priv.h */
 
 /* GObject type implementation */
 G_DEFINE_TYPE(GtktextDocumentManager, gtktext_document_manager, G_TYPE_OBJECT)
@@ -226,142 +197,9 @@ static void update_original_content(DocumentManager *dm)
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════════
- * ATOMIC WRITE IMPLEMENTATION - Robust file writing
- * ═══════════════════════════════════════════════════════════════════════════════ */
+/* Atomic write helpers moved to src/document/atomic_io.c */
 
-gboolean atomic_write_file(const gchar *path, const gchar *content, 
-                          gsize length, GError **error)
-{
-    g_return_val_if_fail(path != NULL, FALSE);
-    g_return_val_if_fail(content != NULL, FALSE);
-    
-    /* Create temp file in same directory for atomic rename */
-    g_autofree gchar *dir = g_path_get_dirname(path);
-    g_autofree gchar *basename = g_path_get_basename(path);
-    g_autofree gchar *tmp_template = g_strdup_printf(".%s.tmp.XXXXXX", basename);
-    g_autofree gchar *tmp_path = g_build_filename(dir, tmp_template, NULL);
-    
-    /* Create temporary file */
-    gint fd = g_mkstemp(tmp_path);
-    if (fd == -1) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "Failed to create temporary file: %s", g_strerror(errno));
-        return FALSE;
-    }
-    
-    /* Write content with proper error handling */
-    gsize written = 0;
-    while (written < length) {
-        gssize result = write(fd, content + written, length - written);
-        if (result < 0) {
-            if (errno == EINTR) {
-                continue; /* Retry on interrupt */
-            }
-            g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                       "Write failed: %s", g_strerror(errno));
-            close(fd);
-            g_unlink(tmp_path);
-            return FALSE;
-        }
-        written += result;
-    }
-    
-    /* Flush and sync to disk */
-    if (fsync(fd) != 0) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "fsync failed: %s", g_strerror(errno));
-        close(fd);
-        g_unlink(tmp_path);
-        return FALSE;
-    }
-    close(fd);
-    
-    /* Atomic rename - platform specific */
-#ifdef G_OS_WIN32
-    /* Windows: use ReplaceFile for atomic replacement when target exists */
-    if (g_file_test(path, G_FILE_TEST_EXISTS)) {
-        if (!ReplaceFile(path, tmp_path, NULL, 0, NULL, NULL)) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "ReplaceFile failed: %lu", GetLastError());
-            g_unlink(tmp_path);
-            return FALSE;
-        }
-    } else {
-        /* For new files, use MoveFile */
-        if (!MoveFile(tmp_path, path)) {
-            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                       "MoveFile failed: %lu", GetLastError());
-            g_unlink(tmp_path);
-            return FALSE;
-        }
-    }
-#else
-    /* POSIX: atomic rename */
-    if (rename(tmp_path, path) != 0) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "rename failed: %s", g_strerror(errno));
-        g_unlink(tmp_path);
-        return FALSE;
-    }
-#endif
-    
-    g_debug("Atomic write successful: %s", path);
-    return TRUE;
-}
-
-gboolean atomic_write_file_from_buffer(const gchar *path, GtkTextBuffer *buffer, 
-                                      GError **error)
-{
-    g_return_val_if_fail(path != NULL, FALSE);
-    g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), FALSE);
-    
-    g_autofree gchar *content = get_buffer_content_as_markdown(buffer);
-    if (!content) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Failed to convert buffer content to markdown");
-        return FALSE;
-    }
-    
-    return atomic_write_file(path, content, strlen(content), error);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════════
- * DIRECTORY MANAGEMENT - Paths and directory creation
- * ═══════════════════════════════════════════════════════════════════════════════ */
-
-gchar* get_drafts_directory(void)
-{
-    const gchar *data_dir = g_get_user_data_dir();
-    g_autofree gchar *app_dir = g_build_filename(data_dir, "gtktext", NULL);
-    gchar *drafts_dir = g_build_filename(app_dir, "drafts", NULL);
-    
-    /* Ensure directory exists */
-    if (g_mkdir_with_parents(drafts_dir, 0700) != 0) {
-        g_warning("Failed to create drafts directory: %s", drafts_dir);
-    }
-    
-    return drafts_dir;
-}
-
-gchar* get_recovery_directory(void)
-{
-    const gchar *cache_dir = g_get_user_cache_dir();
-    g_autofree gchar *app_dir = g_build_filename(cache_dir, "gtktext", NULL);
-    gchar *recovery_dir = g_build_filename(app_dir, "recovery", NULL);
-    
-    /* Ensure directory exists */
-    if (g_mkdir_with_parents(recovery_dir, 0700) != 0) {
-        g_warning("Failed to create recovery directory: %s", recovery_dir);
-    }
-    
-    return recovery_dir;
-}
-
-gchar* get_temp_directory(void)
-{
-    return g_strdup(g_get_tmp_dir());
-}
+/* Directory and file utilities moved to src/document/fs_utils.c */
 
 /* Create a new draft file with timestamped name */
 static gchar* create_draft_file(const gchar *content, GError **error)
@@ -386,79 +224,10 @@ static gchar* create_draft_file(const gchar *content, GError **error)
 }
 
 /* List all draft files in the drafts directory */
-static gchar** list_draft_files(void)
-{
-    g_autofree gchar *drafts_dir = get_drafts_directory();
-    g_autoptr(GDir) dir = g_dir_open(drafts_dir, 0, NULL);
-    
-    if (!dir) {
-        g_debug("Could not open drafts directory: %s", drafts_dir);
-        return NULL;
-    }
-    
-    GPtrArray *drafts = g_ptr_array_new();
-    const gchar *name;
-    
-    while ((name = g_dir_read_name(dir)) != NULL) {
-        /* Only include files that match our draft pattern */
-        if (g_str_has_prefix(name, "draft-") && g_str_has_suffix(name, ".md")) {
-            gchar *full_path = g_build_filename(drafts_dir, name, NULL);
-            g_ptr_array_add(drafts, full_path);
-        }
-    }
-    
-    /* Null-terminate the array */
-    g_ptr_array_add(drafts, NULL);
-    
-    /* Return the array, transferring ownership */
-    return (gchar**)g_ptr_array_free(drafts, FALSE);
-}
 
 /* Get draft file info including timestamp and content preview */
-static gchar* get_draft_display_name(const gchar *draft_path)
-{
-    g_return_val_if_fail(draft_path != NULL, NULL);
-    
-    g_autofree gchar *basename = g_path_get_basename(draft_path);
-    
-    /* Extract timestamp from filename (draft-YYYYMMDD-HHMMSS.md) */
-    if (g_str_has_prefix(basename, "draft-") && g_str_has_suffix(basename, ".md")) {
-        g_autofree gchar *timestamp_part = g_strndup(basename + 6, strlen(basename) - 9);
-        
-        /* Parse timestamp */
-        if (strlen(timestamp_part) == 15 && timestamp_part[8] == '-') {
-            g_autofree gchar *date_part = g_strndup(timestamp_part, 8);
-            g_autofree gchar *time_part = g_strdup(timestamp_part + 9);
-            
-            /* Format as readable date/time */
-            return g_strdup_printf("Draft %s-%s-%s %s:%s:%s",
-                                  g_strndup(date_part, 4),      /* YYYY */
-                                  g_strndup(date_part + 4, 2),  /* MM */
-                                  g_strndup(date_part + 6, 2),  /* DD */
-                                  g_strndup(time_part, 2),      /* HH */
-                                  g_strndup(time_part + 2, 2),  /* MM */
-                                  g_strndup(time_part + 4, 2)); /* SS */
-        }
-    }
-    
-    /* Fallback to filename if parsing fails */
-    return g_strdup(basename);
-}
 
 /* Remove a draft file */
-static gboolean remove_draft_file(const gchar *draft_path, GError **error)
-{
-    g_return_val_if_fail(draft_path != NULL, FALSE);
-    
-    if (g_unlink(draft_path) != 0) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "Failed to remove draft file: %s", g_strerror(errno));
-        return FALSE;
-    }
-    
-    g_debug("Draft file removed: %s", draft_path);
-    return TRUE;
-}
 
 /* Recovery System - Crash recovery and data protection */
 
@@ -511,251 +280,15 @@ static void write_recovery_snapshot(DocumentManager *dm)
     g_debug("Recovery snapshot written: %s", path);
 }
 
-/* List all recovery files in the recovery directory */
-static gchar** list_recovery_files(void)
-{
-    g_autofree gchar *recovery_dir = get_recovery_directory();
-    g_autoptr(GDir) dir = g_dir_open(recovery_dir, 0, NULL);
-    
-    if (!dir) {
-        g_debug("Could not open recovery directory: %s", recovery_dir);
-        return NULL;
-    }
-    
-    GPtrArray *recoveries = g_ptr_array_new();
-    const gchar *name;
-    
-    while ((name = g_dir_read_name(dir)) != NULL) {
-        /* Only include files that match our recovery pattern */
-        if (g_str_has_suffix(name, ".recovery")) {
-            gchar *full_path = g_build_filename(recovery_dir, name, NULL);
-            g_ptr_array_add(recoveries, full_path);
-        }
-    }
-    
-    /* Null-terminate the array */
-    g_ptr_array_add(recoveries, NULL);
-    
-    /* Return the array, transferring ownership */
-    return (gchar**)g_ptr_array_free(recoveries, FALSE);
-}
-
-/* Parse recovery file metadata */
-typedef struct {
-    gchar *original_path;
-    gint64 timestamp;
-    gchar *content;
-    gboolean is_untitled;
-    gchar *draft_path;
-} RecoveryInfo;
-
-static void recovery_info_free(RecoveryInfo *info)
-{
-    if (!info) return;
-    g_free(info->original_path);
-    g_free(info->content);
-    g_free(info->draft_path);
-    g_free(info);
-}
-
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(RecoveryInfo, recovery_info_free)
-
-static RecoveryInfo* parse_recovery_file(const gchar *recovery_path, GError **error)
-{
-    g_return_val_if_fail(recovery_path != NULL, NULL);
-    
-    g_autoptr(GKeyFile) keyfile = g_key_file_new();
-    if (!g_key_file_load_from_file(keyfile, recovery_path, G_KEY_FILE_NONE, error)) {
-        return NULL;
-    }
-    
-    RecoveryInfo *info = g_new0(RecoveryInfo, 1);
-    
-    info->original_path = g_key_file_get_string(keyfile, "Recovery", "OriginalPath", NULL);
-    info->timestamp = g_key_file_get_int64(keyfile, "Recovery", "Timestamp", NULL);
-    info->content = g_key_file_get_string(keyfile, "Recovery", "Content", NULL);
-    info->is_untitled = g_key_file_get_boolean(keyfile, "Recovery", "IsUntitled", NULL);
-    info->draft_path = g_key_file_get_string(keyfile, "Recovery", "DraftPath", NULL);
-    
-    return info;
-}
+/* Recovery internals */
+#include "internal/recovery_priv.h"
 
 /* Get display name for recovery file */
-static gchar* get_recovery_display_name(const gchar *recovery_path)
-{
-    g_return_val_if_fail(recovery_path != NULL, NULL);
-    
-    g_autoptr(GError) error = NULL;
-    g_autoptr(RecoveryInfo) info = parse_recovery_file(recovery_path, &error);
-    
-    if (!info) {
-        g_autofree gchar *basename = g_path_get_basename(recovery_path);
-        return g_strdup(basename);
-    }
-    
-    /* Format timestamp for display */
-    g_autoptr(GDateTime) dt = g_date_time_new_from_unix_local(info->timestamp);
-    g_autofree gchar *time_str = g_date_time_format(dt, "%Y-%m-%d %H:%M:%S");
-    
-    if (info->is_untitled) {
-        return g_strdup_printf("Untitled Document (%s)", time_str);
-    } else if (info->original_path && strlen(info->original_path) > 0) {
-        g_autofree gchar *basename = g_path_get_basename(info->original_path);
-        return g_strdup_printf("%s (%s)", basename, time_str);
-    } else {
-        return g_strdup_printf("Document (%s)", time_str);
-    }
-}
 
 /* Remove a recovery file */
-static gboolean remove_recovery_file(const gchar *recovery_path, GError **error)
-{
-    g_return_val_if_fail(recovery_path != NULL, FALSE);
-    
-    if (g_unlink(recovery_path) != 0) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                   "Failed to remove recovery file: %s", g_strerror(errno));
-        return FALSE;
-    }
-    
-    g_debug("Recovery file removed: %s", recovery_path);
-    return TRUE;
-}
+/* Recovery file removal & old cleanup moved to recovery_drafts.c */
 
-/* Clean up old recovery files (older than 7 days) */
-static void cleanup_old_recovery_files(void)
-{
-    g_autofree gchar **recovery_files = list_recovery_files();
-    if (!recovery_files) return;
-    
-    gint64 cutoff_time = g_get_real_time() / G_USEC_PER_SEC - (7 * 24 * 60 * 60); /* 7 days */
-    
-    for (gint i = 0; recovery_files[i]; i++) {
-        g_autoptr(GError) error = NULL;
-        g_autoptr(RecoveryInfo) info = parse_recovery_file(recovery_files[i], &error);
-        
-        if (info && info->timestamp < cutoff_time) {
-            g_autoptr(GError) remove_error = NULL;
-            if (!remove_recovery_file(recovery_files[i], &remove_error)) {
-                g_warning("Failed to cleanup old recovery file: %s", 
-                         remove_error ? remove_error->message : "Unknown error");
-            } else {
-                g_debug("Cleaned up old recovery file: %s", recovery_files[i]);
-            }
-        }
-    }
-}
-
-/* External Change Detection - File monitoring and conflict resolution */
-
-/* Forward declarations */
-static void on_file_changed(GFileMonitor *monitor, GFile *file, 
-                           GFile *other_file, GFileMonitorEvent event,
-                           gpointer user_data);
-static void show_external_change_dialog(DocumentManager *dm);
-
-/* Setup file monitoring for external changes */
-static void setup_file_monitor(DocumentManager *dm)
-{
-    g_return_if_fail(dm != NULL);
-    
-    /* Only monitor named files */
-    if (!dm->file_path) return;
-    
-    /* Clean up existing monitor if any */
-    if (dm->file_monitor) {
-        g_object_unref(dm->file_monitor);
-        dm->file_monitor = NULL;
-    }
-    
-    g_autoptr(GFile) file = g_file_new_for_path(dm->file_path);
-    GFileMonitor *monitor = g_file_monitor_file(file, 
-                                                G_FILE_MONITOR_NONE, 
-                                                NULL, NULL);
-    if (monitor) {
-        g_signal_connect(monitor, "changed", 
-                        G_CALLBACK(on_file_changed), dm);
-        dm->file_monitor = monitor; /* Take ownership */
-        g_debug("File monitor setup for: %s", dm->file_path);
-    } else {
-        g_warning("Failed to setup file monitor for: %s", dm->file_path);
-    }
-}
-
-/* Handle file change events */
-static void on_file_changed(GFileMonitor *monitor, GFile *file, 
-                           GFile *other_file, GFileMonitorEvent event,
-                           gpointer user_data)
-{
-    (void)monitor; (void)other_file; /* Suppress unused parameter warnings */
-    DocumentManager *dm = user_data;
-    g_return_if_fail(dm != NULL);
-    
-    if (event == G_FILE_MONITOR_EVENT_CHANGED) {
-        /* Check if external modification */
-        g_autoptr(GFileInfo) info = g_file_query_info(file,
-            G_FILE_ATTRIBUTE_TIME_MODIFIED,
-            G_FILE_QUERY_INFO_NONE, NULL, NULL);
-        
-        if (info) {
-            gint64 mtime = g_file_info_get_attribute_uint64(info,
-                G_FILE_ATTRIBUTE_TIME_MODIFIED);
-            
-            if (mtime > dm->last_mtime) {
-                /* External modification detected */
-                g_debug("External modification detected: %s (mtime: %ld > %ld)", 
-                       dm->file_path, mtime, dm->last_mtime);
-                
-                /* Update document state */
-                /* Conflict detection - simplified for now */
-                
-                /* Show conflict resolution dialog */
-                show_external_change_dialog(dm);
-            }
-        }
-    } else if (event == G_FILE_MONITOR_EVENT_DELETED) {
-        g_message("File was deleted externally: %s", dm->file_path);
-        /* TODO: Handle file deletion - could show "file deleted" dialog */
-    }
-}
-
-/* Check if file content has changed externally */
-static gboolean has_file_changed_externally(DocumentManager *dm)
-{
-    g_return_val_if_fail(dm != NULL, FALSE);
-    g_return_val_if_fail(dm->file_path != NULL, FALSE);
-    
-    /* Check modification time */
-    gint64 current_mtime = get_file_mtime(dm->file_path);
-    if (current_mtime > dm->last_mtime) {
-        return TRUE;
-    }
-    
-    /* For additional safety, also check content hash if available */
-    if (dm->last_hash) {
-        g_autoptr(GError) error = NULL;
-        g_autofree gchar *current_hash = calculate_file_hash(dm->file_path, &error);
-        if (current_hash && g_strcmp0(current_hash, dm->last_hash) != 0) {
-            return TRUE;
-        }
-    }
-    
-    return FALSE;
-}
-
-/* Load external file content for comparison/merge */
-static gchar* load_external_content(DocumentManager *dm, GError **error)
-{
-    g_return_val_if_fail(dm != NULL, NULL);
-    g_return_val_if_fail(dm->file_path != NULL, NULL);
-    
-    gchar *content = NULL;
-    if (!g_file_get_contents(dm->file_path, &content, NULL, error)) {
-        return NULL;
-    }
-    
-    return content;
-}
+/* External Change Detection moved to src/document/external_changes.c */
 
 /* Load content from file path and replace buffer contents */
 static gboolean load_content_into_buffer(DocumentManager *dm, const char *file_path, GError **error)
@@ -786,143 +319,11 @@ static gboolean load_content_into_buffer(DocumentManager *dm, const char *file_p
 }
 
 /* Update file metadata after resolving conflict */
-static void update_file_metadata(DocumentManager *dm)
-{
-    g_return_if_fail(dm != NULL);
-    g_return_if_fail(dm->file_path != NULL);
-    
-    /* Update modification time */
-    dm->last_mtime = get_file_mtime(dm->file_path);
-    
-    /* Update content hash */
-    g_autoptr(GError) error = NULL;
-    g_free(dm->last_hash);
-    dm->last_hash = calculate_file_hash(dm->file_path, &error);
-    if (error) {
-        g_warning("Failed to calculate file hash: %s", error->message);
-        dm->last_hash = NULL;
-    }
-    
-    g_debug("File metadata updated: mtime=%ld, hash=%s", 
-           dm->last_mtime, dm->last_hash ? dm->last_hash : "none");
-}
-
-/* Placeholder for UI integration - will be implemented in UI phase */
-static void on_conflict_resolved(ConflictResolution resolution, gpointer user_data)
-{
-    DocumentManager *dm = GTKTEXT_DOCUMENT_MANAGER(user_data);
-    g_return_if_fail(dm != NULL);
-
-    GError *error = NULL;
-
-    switch (resolution) {
-        case CONFLICT_RESOLUTION_RELOAD:
-            /* User chose to reload from external file */
-            if (document_manager_resolve_conflict(dm, TRUE, &error)) {
-                g_debug("Successfully reloaded file from external version: %s", dm->file_path);
-            } else {
-                g_warning("Failed to reload from external version: %s",
-                         error ? error->message : "Unknown error");
-                g_clear_error(&error);
-            }
-            break;
-
-        case CONFLICT_RESOLUTION_KEEP:
-            /* User chose to keep current version */
-            if (document_manager_resolve_conflict(dm, FALSE, &error)) {
-                g_debug("Keeping current version, ignoring external changes: %s", dm->file_path);
-            } else {
-                g_warning("Failed to resolve conflict by keeping current version: %s",
-                         error ? error->message : "Unknown error");
-                g_clear_error(&error);
-            }
-            break;
-
-        case CONFLICT_RESOLUTION_MELD:
-            /* Future: Launch merge tool */
-            g_message("Merge tool integration not yet implemented");
-            /* For now, default to keeping current version */
-            if (document_manager_resolve_conflict(dm, FALSE, &error)) {
-                g_debug("Merge requested but not implemented, keeping current version");
-            } else {
-                g_warning("Failed to resolve conflict: %s",
-                         error ? error->message : "Unknown error");
-                g_clear_error(&error);
-            }
-            break;
-    }
-
-    /* Unref the DocumentManager as we took a reference when showing the dialog */
-    g_object_unref(dm);
-}
-
-static void show_external_change_dialog(DocumentManager *dm)
-{
-    g_return_if_fail(dm != NULL);
-
-    /* Get the parent window for the dialog */
-    GtkWindow *parent_window = dm->window;
-
-    /* Take a reference to the DocumentManager for the async callback */
-    g_object_ref(dm);
-
-    /* Show the conflict resolution dialog */
-    dialogs_show_external_change_conflict(parent_window, dm->file_path,
-                                        on_conflict_resolved, dm);
-
-    g_debug("External change conflict dialog shown for: %s", dm->file_path);
-}
+/* External change conflict handling moved to src/document/external_changes.c */
 
 /* File Utilities - File system operations and checks */
 
-gboolean check_file_writable(const gchar *path)
-{
-    g_return_val_if_fail(path != NULL, FALSE);
-    
-    if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
-        /* Check if parent directory is writable */
-        g_autofree gchar *dir = g_path_get_dirname(path);
-        return check_directory_writable(dir);
-    }
-    
-    return g_access(path, W_OK) == 0;
-}
-
-gboolean check_directory_writable(const gchar *path)
-{
-    g_return_val_if_fail(path != NULL, FALSE);
-    
-    return g_access(path, W_OK) == 0;
-}
-
-gint64 get_file_mtime(const gchar *path)
-{
-    g_return_val_if_fail(path != NULL, 0);
-    
-    g_autoptr(GFile) file = g_file_new_for_path(path);
-    g_autoptr(GFileInfo) info = g_file_query_info(file,
-        G_FILE_ATTRIBUTE_TIME_MODIFIED,
-        G_FILE_QUERY_INFO_NONE, NULL, NULL);
-    
-    if (!info) return 0;
-    
-    return g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_TIME_MODIFIED);
-}
-
-gchar* calculate_file_hash(const gchar *path, GError **error)
-{
-    g_return_val_if_fail(path != NULL, NULL);
-    
-    g_autofree gchar *contents = NULL;
-    gsize length = 0;
-    
-    if (!g_file_get_contents(path, &contents, &length, error)) {
-        return NULL;
-    }
-    
-    return g_compute_checksum_for_data(G_CHECKSUM_SHA256, 
-                                      (const guchar *)contents, length);
-}
+/* File utilities moved to src/document/fs_utils.c */
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HANDLERS - Signal handlers and callbacks
@@ -1046,6 +447,7 @@ static gboolean recovery_timeout_cb(gpointer user_data)
     /* Periodically clean up old recovery files */
     static gint cleanup_counter = 0;
     if (++cleanup_counter >= 20) { /* Every 20 recovery cycles (10 minutes) */
+        /* Periodic cleanup provided by recovery_drafts.c */
         cleanup_old_recovery_files();
         cleanup_counter = 0;
     }
@@ -1199,10 +601,10 @@ static void document_manager_open_async_complete(GObject *source_object, GAsyncR
     g_clear_pointer(&dm->recovery_path, g_free);
 
     /* Update file metadata */
-    update_file_metadata(dm);
+    document_external_update_metadata(dm);
 
     /* Setup file monitoring */
-    setup_file_monitor(dm);
+    document_external_setup_file_monitor(dm);
 
     /* Update original content and set clean state */
     update_original_content(dm);
@@ -1326,15 +728,15 @@ static void document_manager_save_async_complete(GObject *source_object, GAsyncR
     update_original_content(dm);
 
     /* Update file metadata for external change detection */
-    update_file_metadata(dm);
+    document_external_update_metadata(dm);
 
     /* Setup file monitoring if not already active */
-    setup_file_monitor(dm);
+    document_external_setup_file_monitor(dm);
 
     /* If this was a draft, clean up the draft file and update state */
     if (dm->draft_path) {
         g_autoptr(GError) draft_error = NULL;
-        if (!remove_draft_file(dm->draft_path, &draft_error)) {
+        if (!document_manager_remove_draft(dm->draft_path, &draft_error)) {
             g_warning("Failed to remove draft file: %s",
                      draft_error ? draft_error->message : "Unknown error");
         }
@@ -1343,11 +745,7 @@ static void document_manager_save_async_complete(GObject *source_object, GAsyncR
 
     /* Clean up recovery file after successful save */
     if (dm->recovery_path) {
-        g_autoptr(GError) recovery_error = NULL;
-        if (!remove_recovery_file(dm->recovery_path, &recovery_error)) {
-            g_warning("Failed to remove recovery file: %s",
-                     recovery_error ? recovery_error->message : "Unknown error");
-        }
+        document_manager_cleanup_recovery(dm->recovery_path);
         g_clear_pointer(&dm->recovery_path, g_free);
     }
 
@@ -1594,15 +992,15 @@ gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog,
         update_original_content(dm);
         
         /* Update file metadata for external change detection */
-        update_file_metadata(dm);
+        document_external_update_metadata(dm);
         
         /* Setup file monitoring if not already active */
-        setup_file_monitor(dm);
+        document_external_setup_file_monitor(dm);
         
         /* If this was a draft, clean up the draft file and update state */
         if (dm->draft_path) {
             g_autoptr(GError) draft_error = NULL;
-            if (!remove_draft_file(dm->draft_path, &draft_error)) {
+            if (!document_manager_remove_draft(dm->draft_path, &draft_error)) {
                 g_warning("Failed to remove draft file: %s", 
                          draft_error ? draft_error->message : "Unknown error");
             }
@@ -1611,11 +1009,7 @@ gboolean document_manager_save(DocumentManager *dm, gboolean force_dialog,
         
         /* Clean up recovery file after successful save */
         if (dm->recovery_path) {
-            g_autoptr(GError) recovery_error = NULL;
-            if (!remove_recovery_file(dm->recovery_path, &recovery_error)) {
-                g_warning("Failed to remove recovery file: %s",
-                         recovery_error ? recovery_error->message : "Unknown error");
-            }
+            document_manager_cleanup_recovery(dm->recovery_path);
             g_clear_pointer(&dm->recovery_path, g_free);
         }
         
@@ -1709,10 +1103,10 @@ gboolean document_manager_open_file(DocumentManager *dm, const gchar *file_path,
     g_clear_pointer(&dm->recovery_path, g_free);
     
     /* Update file metadata */
-    update_file_metadata(dm);
+    document_external_update_metadata(dm);
     
     /* Setup file monitoring */
-    setup_file_monitor(dm);
+    document_external_setup_file_monitor(dm);
     
     /* Update original content and set clean state */
     update_original_content(dm);
@@ -1749,10 +1143,10 @@ gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar 
     g_clear_pointer(&dm->recovery_path, g_free);
 
     /* Update file metadata */
-    update_file_metadata(dm);
+    document_external_update_metadata(dm);
 
     /* Setup file monitoring */
-    setup_file_monitor(dm);
+    document_external_setup_file_monitor(dm);
 
     /* Update original content and set clean state */
     update_original_content(dm);
@@ -1815,7 +1209,7 @@ gboolean document_manager_discard_current_draft(DocumentManager *dm)
     
     if (dm->draft_path) {
         GError *error = NULL;
-        if (!remove_draft_file(dm->draft_path, &error)) {
+        if (!document_manager_remove_draft(dm->draft_path, &error)) {
             g_warning("Failed to remove draft file: %s", error ? error->message : "Unknown error");
             g_clear_error(&error);
             return FALSE;
@@ -1832,16 +1226,7 @@ gboolean document_manager_discard_current_draft(DocumentManager *dm)
     return TRUE;
 }
 
-/* Public draft management functions */
-gchar** document_manager_list_drafts(void)
-{
-    return list_draft_files();
-}
-
-gchar* document_manager_get_draft_display_name(const gchar *draft_path)
-{
-    return get_draft_display_name(draft_path);
-}
+/* Public draft list/display functions moved to recovery_drafts.c */
 
 gboolean document_manager_open_draft(DocumentManager *dm, const gchar *draft_path, 
                                     GError **error)
@@ -1867,75 +1252,15 @@ gboolean document_manager_open_draft(DocumentManager *dm, const gchar *draft_pat
     return TRUE;
 }
 
-gboolean document_manager_remove_draft(const gchar *draft_path, GError **error)
-{
-    return remove_draft_file(draft_path, error);
-}
+/* Removal implemented in recovery_drafts.c */
 
-gchar** document_manager_list_recovery_files(void)
-{
-    return list_recovery_files();
-}
+/* Recovery list implemented in recovery_drafts.c */
 
 /* Get recovery files for a specific document */
-gchar** document_manager_list_recovery_files_for_document(const gchar *file_path)
-{
-    g_return_val_if_fail(file_path != NULL, NULL);
-
-    /* Get the basename to match against recovery files */
-    g_autofree gchar *basename = g_path_get_basename(file_path);
-
-    /* Get all recovery files first */
-    g_auto(GStrv) all_recovery_files = list_recovery_files();
-    if (!all_recovery_files) {
-        return NULL;
-    }
-
-    /* Filter recovery files for this document */
-    GPtrArray *filtered_files = g_ptr_array_new();
-
-    for (gsize i = 0; all_recovery_files[i] != NULL; i++) {
-        g_autofree gchar *recovery_basename = g_path_get_basename(all_recovery_files[i]);
-
-        /* Check if this recovery file starts with our document's basename */
-        if (g_str_has_prefix(recovery_basename, basename)) {
-            /* Also verify it follows the correct pattern: basename-timestamp.recovery */
-            g_autofree gchar *expected_prefix = g_strdup_printf("%s-", basename);
-            if (g_str_has_prefix(recovery_basename, expected_prefix) &&
-                g_str_has_suffix(recovery_basename, ".recovery")) {
-                g_ptr_array_add(filtered_files, g_strdup(all_recovery_files[i]));
-            }
-        }
-
-        /* Also check metadata for untitled documents that were saved to this path */
-        g_autoptr(RecoveryInfo) info = parse_recovery_file(all_recovery_files[i], NULL);
-        if (info && info->original_path && g_strcmp0(info->original_path, file_path) == 0) {
-            /* Check if we already added this file by basename matching */
-            gboolean already_added = FALSE;
-            for (guint j = 0; j < filtered_files->len; j++) {
-                if (g_strcmp0(g_ptr_array_index(filtered_files, j), all_recovery_files[i]) == 0) {
-                    already_added = TRUE;
-                    break;
-                }
-            }
-            if (!already_added) {
-                g_ptr_array_add(filtered_files, g_strdup(all_recovery_files[i]));
-            }
-        }
-    }
-
-    /* Null-terminate the array */
-    g_ptr_array_add(filtered_files, NULL);
-
-    /* Return the filtered array, transferring ownership */
-    return (gchar**)g_ptr_array_free(filtered_files, FALSE);
-}
+/* Recovery file filtering implemented in recovery_drafts.c */
 
 /* Get display name for recovery file */
-gchar* document_manager_get_recovery_display_name(const gchar *recovery_path)
-{
-    return get_recovery_display_name(recovery_path);
-}
+/* Recovery display implemented in recovery_drafts.c */
 
 gboolean document_manager_recover_from_file(DocumentManager *dm, 
                                            const gchar *recovery_path, 
@@ -1945,7 +1270,7 @@ gboolean document_manager_recover_from_file(DocumentManager *dm,
     g_return_val_if_fail(recovery_path != NULL, FALSE);
     
     /* Parse recovery file */
-    g_autoptr(RecoveryInfo) info = parse_recovery_file(recovery_path, error);
+    g_autoptr(RecoveryInfo) info = document_recovery_parse_file(recovery_path, error);
     if (!info) {
         return FALSE;
     }
@@ -1991,18 +1316,7 @@ gboolean document_manager_recover_from_file(DocumentManager *dm,
     return TRUE;
 }
 
-void document_manager_cleanup_recovery(const gchar *recovery_path)
-{
-    g_return_if_fail(recovery_path != NULL);
-    
-    g_autoptr(GError) error = NULL;
-    if (!remove_recovery_file(recovery_path, &error)) {
-        g_warning("Failed to cleanup recovery file: %s", 
-                 error ? error->message : "Unknown error");
-    } else {
-        g_debug("Recovery file cleaned up: %s", recovery_path);
-    }
-}
+/* Recovery cleanup implemented in recovery_drafts.c */
 
 void document_manager_check_external_changes(DocumentManager *dm)
 {
@@ -2015,14 +1329,14 @@ void document_manager_check_external_changes(DocumentManager *dm)
     /* Conflict detection simplified for now */
     
     /* Check if file has been modified externally */
-    if (has_file_changed_externally(dm)) {
+    if (document_external_has_changed(dm)) {
         g_debug("Manual check detected external changes: %s", dm->file_path);
         
         /* Update document state */
         /* Conflict detection simplified for now */
         
         /* Show conflict resolution dialog */
-        show_external_change_dialog(dm);
+        document_external_show_change_dialog(dm);
     }
 }
 
@@ -2041,7 +1355,7 @@ gboolean document_manager_resolve_conflict(DocumentManager *dm,
         }
         
         /* Update metadata and state */
-        update_file_metadata(dm);
+        document_external_update_metadata(dm);
         update_original_content(dm);
         doc_mark_loaded_or_new(&dm->doc_state);
         
@@ -2052,7 +1366,7 @@ gboolean document_manager_resolve_conflict(DocumentManager *dm,
         gboolean save_result = document_manager_save(dm, FALSE, NULL, NULL);
         if (save_result) {
             /* Update metadata and resolve conflict */
-            update_file_metadata(dm);
+            document_external_update_metadata(dm);
             doc_mark_loaded_or_new(&dm->doc_state);
             g_debug("Conflict resolved: using local version");
         }
@@ -2068,7 +1382,7 @@ gboolean document_manager_has_external_changes(DocumentManager *dm)
     /* Only named files can have external changes */
     if (!dm->file_path) return FALSE;
     
-    return has_file_changed_externally(dm);
+    return document_external_has_changed(dm);
 }
 
 gchar* document_manager_get_external_content(DocumentManager *dm, GError **error)
@@ -2076,7 +1390,7 @@ gchar* document_manager_get_external_content(DocumentManager *dm, GError **error
     g_return_val_if_fail(dm != NULL, NULL);
     g_return_val_if_fail(dm->file_path != NULL, NULL);
 
-    return load_external_content(dm, error);
+    return document_external_load_content(dm, error);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -2126,162 +1440,72 @@ static void document_manager_finalize_initialization(DocumentManager *dm)
  * VERSION HISTORY SYSTEM - Save and restore document versions
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
-/* Get version history directory */
-static gchar* get_version_history_directory(void)
-{
-    const gchar *cache_dir;
-
-    /* Use separate directory during tests to avoid conflicts */
-    if (g_getenv("MESON_TEST_ITERATION")) {
-        cache_dir = "/tmp";
-    } else {
-        cache_dir = g_get_user_cache_dir();
-    }
-
-    gchar *versions_dir = g_build_filename(cache_dir, "gtktext", "versions", NULL);
-
-    /* Ensure directory exists */
-    if (g_mkdir_with_parents(versions_dir, 0755) != 0) {
-        g_warning("Failed to create version history directory: %s", versions_dir);
-    }
-
-    return versions_dir;
-}
-
-/* Check if version history is enabled in settings */
-static gboolean is_version_history_enabled(void)
+/* Local helpers to avoid exposing internal details */
+static gboolean dm_is_version_history_enabled(void)
 {
     g_autoptr(GSettings) settings = g_settings_new("org.gtk.gtktext");
     return g_settings_get_boolean(settings, "version-history-enabled");
 }
 
-/* Get maximum number of versions to keep */
-static gint get_max_versions(void)
+static gchar* dm_get_version_history_directory(void)
 {
-    g_autoptr(GSettings) settings = g_settings_new("org.gtk.gtktext");
-    return g_settings_get_int(settings, "version-history-max-versions");
+    const gchar *cache_dir;
+    if (g_getenv("MESON_TEST_ITERATION")) cache_dir = "/tmp"; else cache_dir = g_get_user_cache_dir();
+    gchar *versions_dir = g_build_filename(cache_dir, "gtktext", "versions", NULL);
+    if (g_mkdir_with_parents(versions_dir, 0755) != 0) {
+        g_warning("Failed to create version history directory: %s", versions_dir);
+    }
+    return versions_dir;
 }
 
-/* Save a version history snapshot */
 gboolean document_manager_save_version_history(DocumentManager *dm, GError **error)
 {
     g_return_val_if_fail(dm != NULL, FALSE);
     g_return_val_if_fail(dm->file_path != NULL, FALSE);
 
-    /* Only save versions if enabled in settings */
-    if (!is_version_history_enabled()) {
-        return TRUE; /* Not an error, just disabled */
+    if (!dm_is_version_history_enabled()) {
+        return TRUE; /* disabled */
     }
 
-    /* Get current content */
-    g_autofree gchar *content = get_buffer_content_as_markdown(dm->buffer);
+    /* Convert current buffer to markdown */
+    g_autofree gchar *content = cm_render_buffer_to_markdown(dm->buffer);
     if (!content) {
         g_set_error(error, GTKTEXT_DOCUMENT_ERROR, GTKTEXT_DOCUMENT_ERROR_IO,
                    "Failed to get buffer content for version history");
         return FALSE;
     }
+    if (g_utf8_strlen(content, -1) == 0) return TRUE;
 
-    /* Skip empty content */
-    if (g_utf8_strlen(content, -1) == 0) {
-        return TRUE;
-    }
-
-    /* Generate version filename with timestamp */
     g_autoptr(GDateTime) now = g_date_time_new_now_local();
     g_autofree gchar *timestamp = g_date_time_format(now, "%Y%m%d-%H%M%S");
     g_autofree gchar *basename = g_path_get_basename(dm->file_path);
-
-    g_autofree gchar *versions_dir = get_version_history_directory();
+    g_autofree gchar *versions_dir = dm_get_version_history_directory();
     g_autofree gchar *filename = g_strdup_printf("%s-%s.version", basename, timestamp);
     g_autofree gchar *version_path = g_build_filename(versions_dir, filename, NULL);
 
-    /* Write version file with metadata */
     g_autoptr(GKeyFile) metadata = g_key_file_new();
     g_key_file_set_string(metadata, "Version", "OriginalPath", dm->file_path);
     g_key_file_set_int64(metadata, "Version", "Timestamp", g_date_time_to_unix(now));
     g_key_file_set_string(metadata, "Version", "Content", content);
     g_key_file_set_string(metadata, "Version", "OriginalBasename", basename);
 
-    /* Save the version file */
-    gsize data_length;
+    gsize data_length = 0;
     g_autofree gchar *data = g_key_file_to_data(metadata, &data_length, error);
-    if (!data) {
-        return FALSE;
-    }
-
-    if (!g_file_set_contents(version_path, data, data_length, error)) {
-        return FALSE;
-    }
+    if (!data) return FALSE;
+    if (!g_file_set_contents(version_path, data, data_length, error)) return FALSE;
 
     g_debug("Version history saved: %s", version_path);
-
-    /* Clean up old versions if we exceed the limit */
     document_manager_cleanup_old_versions(dm->file_path);
-
     return TRUE;
 }
 
-/* List version history files for a document */
-gchar** document_manager_list_version_history(const gchar *file_path)
-{
-    g_return_val_if_fail(file_path != NULL, NULL);
 
-    g_autofree gchar *versions_dir = get_version_history_directory();
-    g_autoptr(GDir) dir = g_dir_open(versions_dir, 0, NULL);
 
-    if (!dir) {
-        g_debug("Could not open version history directory: %s", versions_dir);
-        return NULL;
-    }
+/* Version save implemented above using dm_ helpers */
 
-    /* Get basename to match against version files */
-    g_autofree gchar *basename = g_path_get_basename(file_path);
-    g_autofree gchar *prefix = g_strdup_printf("%s-", basename);
+/* Version list is implemented in version_history.c */
 
-    GPtrArray *versions = g_ptr_array_new();
-    const gchar *name;
-
-    while ((name = g_dir_read_name(dir)) != NULL) {
-        /* Only include files that match our version pattern */
-        if (g_str_has_prefix(name, prefix) && g_str_has_suffix(name, ".version")) {
-            gchar *full_path = g_build_filename(versions_dir, name, NULL);
-            g_ptr_array_add(versions, full_path);
-        }
-    }
-
-    /* Sort by timestamp (newer first) */
-    g_ptr_array_sort(versions, (GCompareFunc)g_strcmp0);
-
-    /* Null-terminate the array */
-    g_ptr_array_add(versions, NULL);
-
-    /* Return the array, transferring ownership */
-    return (gchar**)g_ptr_array_free(versions, FALSE);
-}
-
-/* Get display name for version file */
-gchar* document_manager_get_version_display_name(const gchar *version_path)
-{
-    g_return_val_if_fail(version_path != NULL, NULL);
-
-    g_autoptr(GKeyFile) metadata = g_key_file_new();
-    g_autoptr(GError) error = NULL;
-
-    if (!g_key_file_load_from_file(metadata, version_path, G_KEY_FILE_NONE, &error)) {
-        g_warning("Failed to parse version metadata: %s", error->message);
-        return g_path_get_basename(version_path);
-    }
-
-    gint64 timestamp = g_key_file_get_int64(metadata, "Version", "Timestamp", NULL);
-    if (timestamp > 0) {
-        g_autoptr(GDateTime) dt = g_date_time_new_from_unix_local(timestamp);
-        g_autofree gchar *formatted = g_date_time_format(dt, "%Y-%m-%d %H:%M:%S");
-        return g_strdup_printf("Version from %s", formatted);
-    }
-
-    /* Fallback to filename if parsing fails */
-    return g_path_get_basename(version_path);
-}
+/* Version display is implemented in version_history.c */
 
 /* Restore document from version */
 gboolean document_manager_restore_from_version(DocumentManager *dm,
@@ -2316,28 +1540,4 @@ gboolean document_manager_restore_from_version(DocumentManager *dm,
     return TRUE;
 }
 
-/* Clean up old versions for a document */
-void document_manager_cleanup_old_versions(const gchar *file_path)
-{
-    g_return_if_fail(file_path != NULL);
-
-    g_auto(GStrv) versions = document_manager_list_version_history(file_path);
-    if (!versions) {
-        return;
-    }
-
-    gint max_versions = get_max_versions();
-    gint count = g_strv_length(versions);
-
-    /* Remove old versions if we exceed the limit */
-    if (count > max_versions) {
-        gint to_remove = count - max_versions;
-        for (gint i = count - to_remove; i < count; i++) {
-            if (g_unlink(versions[i]) == 0) {
-                g_debug("Removed old version: %s", versions[i]);
-            } else {
-                g_warning("Failed to remove old version: %s", versions[i]);
-            }
-        }
-    }
-}
+/* Version cleanup is implemented in version_history.c */

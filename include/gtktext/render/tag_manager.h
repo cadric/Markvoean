@@ -5,6 +5,8 @@
    Changed: Extracted tag management from cmrender.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_RENDER_TAG_MANAGER_H
 #define GTKTEXT_RENDER_TAG_MANAGER_H
 

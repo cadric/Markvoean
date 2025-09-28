@@ -5,6 +5,8 @@
    Changed: Extracted status bar management from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_UI_STATUS_MANAGER_H
 #define GTKTEXT_UI_STATUS_MANAGER_H
 

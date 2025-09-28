@@ -5,6 +5,8 @@
    Changed: Extracted image embedding from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_UI_IMAGE_EMBEDDER_H
 #define GTKTEXT_UI_IMAGE_EMBEDDER_H
 

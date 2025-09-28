@@ -1484,6 +1484,7 @@ gboolean cm_render_markdown_to_buffer(GtkTextBuffer *buffer, const char *markdow
 // --- Implementation of cm_render_buffer_to_markdown and its helpers ---
 
 
+#if 0 /* moved to markdown/cmrender_export.c */
 char* cm_render_buffer_to_markdown(GtkTextBuffer *buffer) {
     g_return_val_if_fail(GTK_IS_TEXT_BUFFER(buffer), g_strdup(""));
 
@@ -2445,3 +2446,4 @@ advance_only:
 
     return g_string_free(md, FALSE);
 }
+#endif /* moved to markdown/cmrender_export.c */

@@ -2,18 +2,23 @@
 # [0.2.0] - 2025-09-15 - build-and-run.sh
 # Added: Convenience script to compile, test, and launch IFG.
 
-set -e  # Exit on any error
+set -euo pipefail  # Strict mode
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$PROJECT_ROOT/builddir"
 EXECUTABLE="$BUILD_DIR/src/gtktext"
 SCHEMA_DIR="$PROJECT_ROOT/data"
 
-echo "🔧 Building IFG..."
+echo "🔧 Configuring (C23) and building IFG..."
+if [ ! -d "$BUILD_DIR" ]; then
+  meson setup "$BUILD_DIR" -D c_std=c23
+else
+  meson setup "$BUILD_DIR" --reconfigure -D c_std=c23
+fi
 meson compile -C "$BUILD_DIR"
 
 echo "🧪 Running tests..."
-meson test -C "$BUILD_DIR"
+meson test -C "$BUILD_DIR" --print-errorlogs
 
 echo "📋 Ensuring GSettings schema is compiled..."
 if [ ! -f "$SCHEMA_DIR/gschemas.compiled" ] || [ "$SCHEMA_DIR/org.gtk.gtktext.gschema.xml" -nt "$SCHEMA_DIR/gschemas.compiled" ]; then

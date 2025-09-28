@@ -17,6 +17,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [2.5.12] - 2025-09-28
+
+### Build/Layout (Phase 5 kick-off)
+- Install public headers under `include/gtktext/` via Meson (`install_subdir`).
+- Kept internal headers private (under `src/**/internal/`).
+- No API changes.
+
+### File Dialog UX
+- Demote user-cancelled file dialog to debug logs (was warning).
+- Harden initial-folder selection to only use readable directories to avoid GTK space-measure warnings.
+
+## [2.5.11] - 2025-09-28
+
+### Refactor (Phase 4 — Split Oversized Files)
+- DocumentManager: extracted external change detection into `src/document/external_changes.c` with a private header API.
+- Recovery: deduplicated `RecoveryInfo` and parser into `src/document/internal/recovery_priv.h` + implemented in `recovery_drafts.c`; removed duplicate in `document_manager.c`.
+- Renderer: moved Markdown export (`cm_render_buffer_to_markdown`, `cm_render_selection_to_markdown`) to `src/render/markdown/cmrender_export.c`; updated Meson.
+- Toolbar: removed dead `.inc` files (`toolbar_handlers.inc`, `toolbar_wiring.inc`).
+- Internal headers: added `src/document/internal/document_manager_priv.h` for GObject struct sharing.
+
+### Build
+- Meson updated to compile new modules; build is green with no new warnings.
+
+### Notes
+- No behavior changes intended; pure modularization and hygiene.
+
+## [2.5.10] - 2025-09-28
+
+### Refactor
+- Consolidated duplicate text view logic: event handlers now delegate link click, tooltip, motion, and Ctrl+scroll zoom to `text_view_interactions` implementation to avoid dual maintenance.
+- No behavior change; centralizes one canonical code path.
+
+## [2.5.9] - 2025-09-28
+
+### Build
+- Minimum standard raised to C23 across the project (Meson `c_std=c23`).
+
+### Header Hygiene
+- Fixed umbrella header `include/gtktext/gtktext.h` to reference correct public headers under `gtktext/render`, `gtktext/components`, `gtktext/core`, and `gtktext/document`.
+- Added `#pragma once` to `include/gtktext/core/settings.h` and namespaced its include guard (`GTKTEXT_CORE_SETTINGS_H`).
+
+### Notes
+- No functional changes; purely build and header hygiene updates in preparation for further refactors.
+
+## [2.5.8] - 2025-09-20
+
+### Fixed
+- **Critical Fix**: Copy/cut operations now preserve markdown formatting instead of copying plain text
+- Ctrl+C now uses `text_view_copy_selected_as_markdown()` to maintain formatting (bold, italic, links, etc.)
+- Ctrl+X now copies markdown formatting before deleting, preserving rich content in clipboard
+- Restored functionality that was accidentally broken when implementing standard shortcuts
+
+### Technical
+- Added `get_active_text_view()` helper function to access text view from application context
+- Copy/cut actions now properly call existing markdown-aware functions instead of generic GTK clipboard operations
+- Ensures users can copy/paste rich content between documents while preserving formatting
+
+## [2.5.7] - 2025-09-20
+
+### Added
+- Standard text editing shortcuts: Ctrl+X (cut), Ctrl+C (copy), Ctrl+V (paste), Ctrl+A (select all)
+- Ctrl+P placeholder shortcut for future print/export functionality
+- Updated shortcuts window to display all new text editing shortcuts
+
+### Improved
+- Better GNOME HIG compliance with standard keyboard shortcuts
+- More intuitive text editing experience for users familiar with common shortcuts
+
 ## [2.5.6] - 2025-09-20
 
 ### Fixed

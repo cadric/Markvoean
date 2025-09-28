@@ -2,7 +2,9 @@
  * Purpose: Per-tab document container for GTK markdown editor
  * [1.1.0] - 2025-09-17 - ui/tab_document.h
  * MAJOR RELEASE: Opaque API design with proper encapsulation
- */
+*/
+
+#pragma once
 
 #ifndef GTKTEXT_TAB_DOCUMENT_H
 #define GTKTEXT_TAB_DOCUMENT_H

@@ -5,6 +5,8 @@
    Changed: Extracted window lifecycle management from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_CORE_WINDOW_LIFECYCLE_H
 #define GTKTEXT_CORE_WINDOW_LIFECYCLE_H
 

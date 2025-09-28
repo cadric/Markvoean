@@ -1,6 +1,8 @@
 /* [0.2.0] - 2025-09-15 - include/tag_util.h
  * Changed: Added proper input validation with g_return_if_fail().
  */
+
+#pragma once
 #ifndef TAG_UTIL_H
 #define TAG_UTIL_H
 

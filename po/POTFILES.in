@@ -1,11 +1,35 @@
-# [0.2.0] - 2025-09-15 - po/POTFILES.in
-# Changed: Added new source files and UI files for translation support.
-# List of source files which contain translatable strings.
+# [2.5.9] - 2025-09-28 - po/POTFILES.in
+# Changed: Refreshed paths after modularization; accurate sources for gettext.
+# List of source and UI files which contain translatable strings.
+
+# Core / App
 src/main.c
-src/toolbar.c
-src/settings.c
-src/document.c
-src/image-widget.c
+src/core/app_initialization.c
+src/core/settings.c
+
+# Documents
+src/document/document_manager.c
+
+# Editor / Components
+src/editor/buffer_manager.c
+src/components/toolbar/toolbar.c
+
+# Rendering
+src/render/markdown/cmrender.c
+
+# UI Actions & Dialogs
+src/ui/actions/app_actions.c
+src/ui/actions/edit_actions.c
+src/ui/actions/file_actions.c
+src/ui/dialogs/dialogs.c
+src/ui/status_manager.c
+src/ui/tab_document.c
+src/ui/tab_integration.c
+src/ui/tab_manager.c
+
+# GtkBuilder UIs
 ui/main_window.ui
 ui/shortcuts.ui
-data/gtktext.desktop.in
+
+# Desktop file (merged with translations)
+data/org.gtk.gtktext.desktop.in

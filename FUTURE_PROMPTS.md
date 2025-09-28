@@ -63,8 +63,8 @@ You are implementing **Version History** and **Crash Restore** in a GTK4 text ed
 ## Comprehensive Keyboard Shortcuts for CommonMark Editor
 
 **Status:** 🟡 Partially Implemented
-- ✅ **Done:** Basic file operations (Ctrl+O, Ctrl+S, Ctrl+Shift+S), tab operations (Ctrl+T, Ctrl+W), basic editing (Ctrl+Z, Ctrl+Shift+Z), preferences (Ctrl+,), shortcuts window (Ctrl+?)
-- ❌ **Not Done:** Rich-text formatting shortcuts (bold, italic, links, code, headings, lists), navigation shortcuts, GNOME-specific shortcuts, text editing shortcuts (cut/copy/paste, select all, find/replace), dual redo support (Ctrl+Y), comprehensive command palette
+- ✅ **Done:** Basic file operations (Ctrl+O, Ctrl+S, Ctrl+Shift+S), tab operations (Ctrl+T, Ctrl+W), basic editing (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y), text editing shortcuts (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), print placeholder (Ctrl+P), preferences (Ctrl+,), shortcuts window (Ctrl+?, F1), quit (Ctrl+Q)
+- ❌ **Not Done:** Rich-text formatting shortcuts (bold, italic, links, code, headings, lists), navigation shortcuts, find/replace shortcuts, comprehensive command palette
 
 **Original Prompt:**
 You are implementing and validating keyboard shortcuts for a rich-text CommonMark (Markdown) editor targeting GNOME. Use these bindings by default. Expose a rebinding layer, but keep defaults unless overridden. Avoid conflicts with GNOME window shortcuts.
@@ -74,17 +74,17 @@ Scope:
 * Cross-platform, but optimize for GNOME on Linux. Where two conventions exist, support both.
 
 General (document):
-* Ctrl+N → New document ❌
+* Ctrl+N → New document ✅ *Via Ctrl+T or Ctrl+N*
 * Ctrl+O → Open file ✅
 * Ctrl+S → Save ✅
 * Ctrl+Shift+S → Save As ✅
-* Ctrl+P → Print/Export ❌
+* Ctrl+P → Print/Export ✅ *Placeholder implemented*
 * Ctrl+W → Close tab/document ✅
-* Ctrl+Q → Quit app ❌
+* Ctrl+Q → Quit app ✅
 * Ctrl+Z → Undo ✅
-* Ctrl+Shift+Z and Ctrl+Y → Redo (support both) 🟡 *Only Ctrl+Shift+Z supported*
-* Ctrl+X / Ctrl+C / Ctrl+V → Cut/Copy/Paste ❌
-* Ctrl+A → Select all ❌
+* Ctrl+Shift+Z and Ctrl+Y → Redo (support both) ✅
+* Ctrl+X / Ctrl+C / Ctrl+V → Cut/Copy/Paste ✅
+* Ctrl+A → Select all ✅
 * Ctrl+F → Find ❌
 * Ctrl+H → Replace ❌
 
@@ -109,8 +109,8 @@ Navigation and editing:
 * Ctrl+PageUp / Ctrl+PageDown → Switch tabs (or pages if applicable) ❌
 
 GNOME-specific app/window:
-* F1 → Help ❌
-* F10 → Menu bar ❌
+* F1 → Help ✅ *Shows shortcuts window*
+* F10 → Menu bar ✅ *Works automatically in GTK*
 * Ctrl+, → Preferences ✅
 * Ctrl+Tab → Next tab ❌
 * Ctrl+Shift+T → Reopen closed tab ❌

@@ -2,7 +2,9 @@
  * Purpose: Type-safe and error-checked helpers for GTK text buffer rendering operations
  * [1.0.0] - 2025-09-19 - render/safe_helpers.h
  * Phase 2: Enhanced safety for async rendering pipeline
- */
+*/
+
+#pragma once
 
 #ifndef GTKTEXT_RENDER_SAFE_HELPERS_H
 #define GTKTEXT_RENDER_SAFE_HELPERS_H

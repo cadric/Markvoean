@@ -1,8 +1,8 @@
 /* C ULTRA-MIN TEMPLATE
-   Purpose: Edit action callbacks (undo, redo) for GTK markdown editor
+   Purpose: Edit action callbacks (undo, redo, cut, copy, paste, select all) for GTK markdown editor
    Sections: META • TYPES • STATE • HELPERS • HANDLERS • WIRING • LIFECYCLE
-   [1.0.0] - 2025-09-20 - ui/actions/edit_actions.c
-   Added: Edit actions for undo/redo functionality
+   [1.0.1] - 2025-09-20 - ui/actions/edit_actions.c
+   Fixed: Copy/cut operations now preserve markdown formatting using text_view_copy_selected_as_markdown
 */
 
 #ifdef HAVE_CONFIG_H
@@ -18,6 +18,7 @@
 #include <gtktext/ui/tab_manager.h>
 #include <gtktext/ui/tab_document.h>
 #include <gtktext/ui/dialogs.h>
+#include <gtktext/ui/text_view_interactions.h>
 #include <gtktext/document/document_manager.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -48,6 +49,31 @@ static GtkTextBuffer* get_active_text_buffer(GtkApplication *app)
     }
 
     return buffer;
+}
+
+static GtkTextView* get_active_text_view(GtkApplication *app)
+{
+    g_return_val_if_fail(GTK_IS_APPLICATION(app), NULL);
+
+    TabManager *tab_manager = gtktext_get_tab_manager(app);
+    if (!tab_manager) {
+        g_warning("No tab manager found");
+        return NULL;
+    }
+
+    AdwTabPage *active_page = tab_manager_get_active_tab(tab_manager);
+    if (!active_page) {
+        g_warning("No active tab found");
+        return NULL;
+    }
+
+    GtkWidget *text_view_widget = tab_manager_get_text_view(tab_manager, active_page);
+    if (!text_view_widget || !GTK_IS_TEXT_VIEW(text_view_widget)) {
+        g_warning("No active text view found");
+        return NULL;
+    }
+
+    return GTK_TEXT_VIEW(text_view_widget);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -227,5 +253,99 @@ void edit_action_version_history_cb(GSimpleAction *action, GVariant *parameter, 
     /* Show the version history dialog */
     dialogs_show_document_version_history(window, current_file_path, on_version_action, app);
     g_debug("Version history dialog shown for document: %s", current_file_path);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * STANDARD TEXT EDITING ACTIONS - Cut, Copy, Paste, Select All
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+void edit_action_cut_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkTextView *text_view = get_active_text_view(app);
+
+    if (!text_view) {
+        g_debug("Cannot cut: no active text view");
+        return;
+    }
+
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(text_view);
+    if (!gtk_text_buffer_get_has_selection(buffer)) {
+        g_debug("Cannot cut: no text selected");
+        return;
+    }
+
+    /* First copy with markdown formatting preserved */
+    text_view_copy_selected_as_markdown(text_view);
+
+    /* Then delete the selected text */
+    gtk_text_buffer_delete_selection(buffer, TRUE, TRUE);
+    g_debug("Cut with markdown formatting performed");
+}
+
+void edit_action_copy_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkTextView *text_view = get_active_text_view(app);
+
+    if (!text_view) {
+        g_debug("Cannot copy: no active text view");
+        return;
+    }
+
+    /* Use the markdown-aware copy function that preserves formatting */
+    text_view_copy_selected_as_markdown(text_view);
+    g_debug("Copy with markdown formatting performed");
+}
+
+void edit_action_paste_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkWindow *window = gtk_application_get_active_window(app);
+    if (!window) {
+        g_debug("Cannot paste: no active window");
+        return;
+    }
+
+    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(window));
+    GdkClipboard *clipboard = gdk_display_get_clipboard(display);
+
+    GtkTextBuffer *buffer = get_active_text_buffer(app);
+    if (!buffer) {
+        g_debug("Cannot paste: no active text buffer");
+        return;
+    }
+
+    gtk_text_buffer_paste_clipboard(buffer, clipboard, NULL, TRUE);
+    g_debug("Paste performed");
+}
+
+void edit_action_select_all_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action;
+    (void)parameter;
+
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkTextBuffer *buffer = get_active_text_buffer(app);
+
+    if (!buffer) {
+        g_debug("Cannot select all: no active text buffer");
+        return;
+    }
+
+    GtkTextIter start, end;
+    gtk_text_buffer_get_start_iter(buffer, &start);
+    gtk_text_buffer_get_end_iter(buffer, &end);
+    gtk_text_buffer_select_range(buffer, &start, &end);
+    g_debug("Select all performed");
 }
 

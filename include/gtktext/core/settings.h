@@ -1,8 +1,10 @@
-/* [0.2.0] - 2025-09-15 - include/settings.h
- * Changed: Added version header tracking.
+/* [2.5.9] - 2025-09-28 - include/gtktext/core/settings.h
+ * Changed: Add #pragma once for C23 header hygiene; keep API intact.
  */
-#ifndef SETTINGS_H
-#define SETTINGS_H
+#pragma once
+/* Legacy include guard retained for compatibility with external tools */
+#ifndef GTKTEXT_CORE_SETTINGS_H
+#define GTKTEXT_CORE_SETTINGS_H
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
@@ -31,4 +33,4 @@ GSettings* gtktext_get_app_settings(void);
 }
 #endif
 
-#endif // SETTINGS_H
+#endif // GTKTEXT_CORE_SETTINGS_H

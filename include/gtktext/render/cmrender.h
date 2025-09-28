@@ -1,6 +1,8 @@
 /* [0.2.0] - 2025-09-15 - include/cmrender.h
  * Changed: Added version header tracking.
- */
+*/
+
+#pragma once
 #ifndef CMRENDER_H
 #define CMRENDER_H
 

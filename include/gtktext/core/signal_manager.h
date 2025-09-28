@@ -4,6 +4,8 @@
  * Created: Proper encapsulation replacement for global signal variables
  */
 
+#pragma once
+
 #ifndef GTKTEXT_SIGNAL_MANAGER_H
 #define GTKTEXT_SIGNAL_MANAGER_H
 

@@ -3,6 +3,8 @@
  * MAJOR: Clean GTK4-compliant implementation with resource loading
  */
 
+#pragma once
+
 #ifndef GTKTEXT_CORE_APP_INITIALIZATION_H
 #define GTKTEXT_CORE_APP_INITIALIZATION_H
 

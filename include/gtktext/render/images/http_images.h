@@ -5,6 +5,8 @@
    Changed: Extracted HTTP image processing from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_RENDER_IMAGES_HTTP_IMAGES_H
 #define GTKTEXT_RENDER_IMAGES_HTTP_IMAGES_H
 

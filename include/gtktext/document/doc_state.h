@@ -5,6 +5,8 @@
    Added: Hash-based document state tracking for deterministic clean/dirty detection
 */
 
+#pragma once
+
 #ifndef GTKTEXT_DOC_STATE_H
 #define GTKTEXT_DOC_STATE_H
 

@@ -1,6 +1,8 @@
 /* [0.2.0] - 2025-09-15 - include/gtktext/image-widget.h
  * Added: GObject type system for image widget management.
  */
+
+#pragma once
 #ifndef GTKTEXT_IMAGE_WIDGET_H
 #define GTKTEXT_IMAGE_WIDGET_H
 

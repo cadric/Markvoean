@@ -10,6 +10,7 @@ endif
 # Source files for library (all except main.c) - using new module structure
 lib_sources = [
   '../src/render/markdown/cmrender.c',
+  '../src/render/markdown/cmrender_export.c',
   '../src/render/markdown/tag_manager.c',
   '../src/render/markdown/markdown_engine.c',
   '../src/render/visual/theme_styles.c',
@@ -27,6 +28,11 @@ lib_sources = [
   '../src/core/window_lifecycle.c',
   '../src/document/document.c',
   '../src/document/document_manager.c',
+  '../src/document/atomic_io.c',
+  '../src/document/fs_utils.c',
+  '../src/document/version_history.c',
+  '../src/document/recovery_drafts.c',
+  '../src/document/external_changes.c',
   '../src/document/doc_state.c',
   '../src/ui/actions/file_actions.c',
   '../src/ui/actions/app_actions.c',

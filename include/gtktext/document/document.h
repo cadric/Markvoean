@@ -1,6 +1,8 @@
 /* [0.2.0] - 2025-09-15 - include/gtktext/document.h
  * Added: GObject type system for document management.
- */
+*/
+
+#pragma once
 #ifndef GTKTEXT_DOCUMENT_H
 #define GTKTEXT_DOCUMENT_H
 

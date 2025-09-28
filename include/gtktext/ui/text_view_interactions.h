@@ -5,6 +5,8 @@
    Changed: Extracted text view interactions from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_UI_TEXT_VIEW_INTERACTIONS_H
 #define GTKTEXT_UI_TEXT_VIEW_INTERACTIONS_H
 

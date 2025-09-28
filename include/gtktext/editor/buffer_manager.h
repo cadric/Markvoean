@@ -5,6 +5,8 @@
    Changed: Extracted buffer management from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_EDITOR_BUFFER_MANAGER_H
 #define GTKTEXT_EDITOR_BUFFER_MANAGER_H
 

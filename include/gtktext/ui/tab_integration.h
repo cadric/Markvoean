@@ -2,7 +2,9 @@
  * Purpose: Temporary integration layer for TabManager with existing app structure
  * [1.0.0] - 2025-09-17 - ui/tab_integration.h
  * Created: Bridge between new tab system and existing single-document architecture
- */
+*/
+
+#pragma once
 
 #ifndef GTKTEXT_TAB_INTEGRATION_H
 #define GTKTEXT_TAB_INTEGRATION_H

@@ -5,6 +5,8 @@
    Changed: Extracted markdown processing engine from main.c for better organization
 */
 
+#pragma once
+
 #ifndef GTKTEXT_RENDER_MARKDOWN_MARKDOWN_ENGINE_H
 #define GTKTEXT_RENDER_MARKDOWN_MARKDOWN_ENGINE_H
 

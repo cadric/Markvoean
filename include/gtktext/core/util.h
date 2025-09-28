@@ -1,6 +1,7 @@
 /* [0.2.0] - 2025-09-15 - include/gtktext/util.h
  * Added: Ultra-Min C Module Template example header.
  */
+#pragma once
 #ifndef GTKTEXT_UTIL_H
 #define GTKTEXT_UTIL_H
 

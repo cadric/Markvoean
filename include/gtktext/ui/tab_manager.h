@@ -3,6 +3,8 @@
  * [1.0.1] - 2025-09-18 - ui/tab_manager.h
  */
 
+#pragma once
+
 #ifndef GTKTEXT_TAB_MANAGER_H
 #define GTKTEXT_TAB_MANAGER_H
 

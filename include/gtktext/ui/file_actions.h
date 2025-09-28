@@ -5,6 +5,8 @@
    Changed: Added shared helper function declaration
 */
 
+#pragma once
+
 #ifndef GTKTEXT_UI_FILE_ACTIONS_H
 #define GTKTEXT_UI_FILE_ACTIONS_H
 

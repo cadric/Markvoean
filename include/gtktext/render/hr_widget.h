@@ -1,6 +1,8 @@
 /* [1.3.9] - 2025-09-18 - include/gtktext/render/hr_widget.h
  * Created: Custom horizontal rule widget for proper markdown HR rendering
- */
+*/
+
+#pragma once
 
 #ifndef GTKTEXT_HR_WIDGET_H
 #define GTKTEXT_HR_WIDGET_H

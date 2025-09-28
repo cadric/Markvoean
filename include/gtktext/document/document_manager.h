@@ -5,6 +5,8 @@
    MAJOR RELEASE: Complete DocumentManager implementation with all 6 phases
 */
 
+#pragma once
+
 #ifndef GTKTEXT_DOCUMENT_MANAGER_H
 #define GTKTEXT_DOCUMENT_MANAGER_H
 

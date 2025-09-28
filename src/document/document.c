@@ -217,7 +217,11 @@ void document_handlers_on_open_file_dialog_finish(GObject *source_object, GAsync
     GError *finish_error = NULL;
     g_autoptr(GFile) file = gtk_file_dialog_open_finish(d, res, &finish_error);
     if (finish_error) {
-        g_warning("File dialog finished with error: %s", finish_error->message);
+        if (g_error_matches(finish_error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_debug("File dialog dismissed by user");
+        } else {
+            g_warning("File dialog finished with error: %s", finish_error->message);
+        }
         g_clear_error(&finish_error);
         return;
     }

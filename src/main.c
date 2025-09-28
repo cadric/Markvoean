@@ -103,6 +103,11 @@ int main(int argc, char *argv[])
         { "undo", edit_action_undo_cb, NULL, NULL, NULL, {0} },
         { "redo", edit_action_redo_cb, NULL, NULL, NULL, {0} },
         { "version-history", edit_action_version_history_cb, NULL, NULL, NULL, {0} },
+        { "cut", edit_action_cut_cb, NULL, NULL, NULL, {0} },
+        { "copy", edit_action_copy_cb, NULL, NULL, NULL, {0} },
+        { "paste", edit_action_paste_cb, NULL, NULL, NULL, {0} },
+        { "select-all", edit_action_select_all_cb, NULL, NULL, NULL, {0} },
+        { "print", app_action_print_cb, NULL, NULL, NULL, {0} },
         { "preferences", app_action_preferences_cb, NULL, NULL, NULL, {0} },
         { "about", app_action_about_cb, NULL, NULL, NULL, {0} },
         { "shortcuts", app_action_shortcuts_cb, NULL, NULL, NULL, {0} },
@@ -120,9 +125,14 @@ int main(int argc, char *argv[])
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.open", (const char*[]){ "<primary>o", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save", (const char*[]){ "<primary>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save-as", (const char*[]){ "<primary><shift>s", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.print", (const char*[]){ "<primary>p", NULL });
   // Edit shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.undo", (const char*[]){ "<primary>z", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.redo", (const char*[]){ "<primary><shift>z", "<primary>y", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.cut", (const char*[]){ "<primary>x", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.copy", (const char*[]){ "<primary>c", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.paste", (const char*[]){ "<primary>v", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.select-all", (const char*[]){ "<primary>a", NULL });
   // App shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.preferences", (const char*[]){ "<primary>comma", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.shortcuts", (const char*[]){ "<primary>question", "F1", NULL });

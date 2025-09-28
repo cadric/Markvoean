@@ -1,11 +1,11 @@
-# [2.5.6] - 2025-09-20 - meson.build
-# Fixed: Ctrl+Q quit action now checks for unsaved changes and shows save dialog
+# [2.5.8] - 2025-09-20 - meson.build
+# Fixed: Copy/cut operations now preserve markdown formatting instead of plain text
 
 project('gtktext', 'c',
-  version: '2.5.6',
+  version: '2.5.12',
   meson_version: '>= 1.7.2',
   default_options: [
-    'c_std=c17',
+    'c_std=c23',
     'warning_level=2',
     'werror=false',
     'optimization=2',
@@ -69,6 +69,9 @@ subdir('data')
 subdir('ui')
 subdir('po')
 subdir('tests')
+
+# Install public headers (entire include/gtktext tree)
+install_subdir('include/gtktext', install_dir: get_option('includedir') / 'gtktext')
 
 # Summary
 summary({

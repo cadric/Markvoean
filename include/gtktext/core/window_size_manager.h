@@ -3,6 +3,8 @@
  * [1.0.0] - 2025-09-18 - core/window_size_manager.h
  */
 
+#pragma once
+
 #ifndef GTKTEXT_WINDOW_SIZE_MANAGER_H
 #define GTKTEXT_WINDOW_SIZE_MANAGER_H
 

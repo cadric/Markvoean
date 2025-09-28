@@ -97,6 +97,25 @@ void app_action_shortcuts_cb(GSimpleAction *action, GVariant *parameter, gpointe
     }
 }
 
+/* Print/Export action callback (placeholder) */
+void app_action_print_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GtkWindow *parent = gtk_application_get_active_window(app);
+    if (!parent) return;
+
+    /* Show placeholder dialog for print/export functionality */
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+        _("Print/Export"),
+        _("Print and export functionality will be implemented in a future version.")
+    ));
+
+    adw_alert_dialog_add_responses(dialog, "ok", _("_OK"), NULL);
+    adw_alert_dialog_set_default_response(dialog, "ok");
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(parent));
+}
+
 /* Quit application action callback */
 void app_action_quit_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {

@@ -6,6 +6,7 @@ render_sources = []
 # Markdown rendering modules
 render_sources += files(
   'markdown/cmrender.c',
+  'markdown/cmrender_export.c',
   'markdown/tag_manager.c',
   'markdown/markdown_engine.c'
 )

@@ -79,7 +79,16 @@ static gboolean file_action_is_valid_directory(const char *path)
     GFileType type = g_file_info_get_file_type(info);
     g_object_unref(info);
 
-    return (type == G_FILE_TYPE_DIRECTORY);
+    if (type != G_FILE_TYPE_DIRECTORY) {
+        return FALSE;
+    }
+
+    /* Basic access check: ensure we can read/enter the directory */
+    if (g_access(path, R_OK | X_OK) != 0) {
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /* Helper function to set up file filters for open dialogs */
@@ -224,7 +233,11 @@ void file_action_on_open_dialog_finish(GObject *source_object, GAsyncResult *res
     GError *finish_error = NULL;
     g_autoptr(GFile) file = gtk_file_dialog_open_finish(d, res, &finish_error);
     if (finish_error) {
-        g_warning("File dialog finished with error: %s", finish_error->message);
+        if (g_error_matches(finish_error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_debug("File dialog dismissed by user");
+        } else {
+            g_warning("File dialog finished with error: %s", finish_error->message);
+        }
         g_clear_error(&finish_error);
         return;
     }
@@ -258,7 +271,11 @@ void file_action_on_open_dialog_finish_tab(GObject *source_object, GAsyncResult 
     OpenFileContext *context = (OpenFileContext *)user_data;
 
     if (finish_error) {
-        g_warning("File dialog finished with error: %s", finish_error->message);
+        if (g_error_matches(finish_error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_debug("File dialog dismissed by user");
+        } else {
+            g_warning("File dialog finished with error: %s", finish_error->message);
+        }
         g_clear_error(&finish_error);
         g_free(context);
         return;
@@ -303,7 +320,11 @@ void file_action_on_save_as_dialog_finish(GObject *source_object, GAsyncResult *
     GError *finish_error = NULL;
     g_autoptr(GFile) file = gtk_file_dialog_save_finish(d, res, &finish_error);
     if (finish_error) {
-        g_warning("Save dialog finished with error: %s", finish_error->message);
+        if (g_error_matches(finish_error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_debug("Save dialog dismissed by user");
+        } else {
+            g_warning("Save dialog finished with error: %s", finish_error->message);
+        }
         g_clear_error(&finish_error);
         return;
     }
@@ -396,7 +417,11 @@ void file_action_on_save_as_dialog_finish_tab(GObject *source_object, GAsyncResu
     SaveFileContext *context = (SaveFileContext *)user_data;
 
     if (finish_error) {
-        g_warning("Save dialog finished with error: %s", finish_error->message);
+        if (g_error_matches(finish_error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_debug("Save dialog dismissed by user");
+        } else {
+            g_warning("Save dialog finished with error: %s", finish_error->message);
+        }
         g_clear_error(&finish_error);
         g_free(context);
         return;

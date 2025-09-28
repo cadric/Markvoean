@@ -2,6 +2,7 @@
    MAJOR RELEASE: Updated version for DocumentManager system integration
  * Added: Source view toggle functionality for switching between WYSIWYG and raw markdown.
  */
+#pragma once
 #ifndef TOOLBAR_H
 #define TOOLBAR_H
 
