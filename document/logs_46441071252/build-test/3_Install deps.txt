@@ -1,0 +1,51 @@
+﻿2025-09-28T09:24:53.4756790Z ##[group]Run sudo apt-get update
+2025-09-28T09:24:53.4757738Z [36;1msudo apt-get update[0m
+2025-09-28T09:24:53.4760471Z [36;1msudo apt-get install -y meson ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy include-what-you-use xvfb[0m
+2025-09-28T09:24:53.4799004Z shell: /usr/bin/bash -e {0}
+2025-09-28T09:24:53.4800120Z ##[endgroup]
+2025-09-28T09:24:53.6401508Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2025-09-28T09:24:53.6821395Z Hit:6 https://packages.microsoft.com/repos/azure-cli noble InRelease
+2025-09-28T09:24:53.6825747Z Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+2025-09-28T09:24:53.6829012Z Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+2025-09-28T09:24:53.6893448Z Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+2025-09-28T09:24:53.6993466Z Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+2025-09-28T09:24:53.7086798Z Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+2025-09-28T09:24:53.9453723Z Get:8 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [39.5 kB]
+2025-09-28T09:24:53.9663084Z Get:9 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [57.1 kB]
+2025-09-28T09:24:53.9825494Z Get:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1443 kB]
+2025-09-28T09:24:53.9910971Z Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [282 kB]
+2025-09-28T09:24:53.9934096Z Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [175 kB]
+2025-09-28T09:24:53.9952605Z Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 c-n-f Metadata [15.3 kB]
+2025-09-28T09:24:53.9966150Z Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1485 kB]
+2025-09-28T09:24:54.0055508Z Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [299 kB]
+2025-09-28T09:24:54.0084546Z Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [377 kB]
+2025-09-28T09:24:54.0186856Z Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 c-n-f Metadata [31.0 kB]
+2025-09-28T09:24:54.0206755Z Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1957 kB]
+2025-09-28T09:24:54.0301372Z Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [441 kB]
+2025-09-28T09:24:54.0802173Z Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Components [212 B]
+2025-09-28T09:24:54.0812008Z Get:21 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+2025-09-28T09:24:54.0855869Z Get:22 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [7068 B]
+2025-09-28T09:24:54.0857832Z Get:23 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [28.9 kB]
+2025-09-28T09:24:54.0860450Z Get:24 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [11.0 kB]
+2025-09-28T09:24:54.0862385Z Get:25 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 c-n-f Metadata [1444 B]
+2025-09-28T09:24:54.0864324Z Get:26 http://azure.archive.ubuntu.com/ubuntu noble-backports/restricted amd64 Components [216 B]
+2025-09-28T09:24:54.0873063Z Get:27 http://azure.archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Components [212 B]
+2025-09-28T09:24:54.0887761Z Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [1171 kB]
+2025-09-28T09:24:54.0950543Z Get:29 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [198 kB]
+2025-09-28T09:24:54.0968871Z Get:30 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [21.6 kB]
+2025-09-28T09:24:54.0980245Z Get:31 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 c-n-f Metadata [8744 B]
+2025-09-28T09:24:54.0992093Z Get:32 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [880 kB]
+2025-09-28T09:24:54.1043219Z Get:33 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [195 kB]
+2025-09-28T09:24:54.1503379Z Get:34 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [52.2 kB]
+2025-09-28T09:24:54.1516633Z Get:35 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 c-n-f Metadata [18.0 kB]
+2025-09-28T09:24:54.1531967Z Get:36 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1872 kB]
+2025-09-28T09:24:54.1619715Z Get:37 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [423 kB]
+2025-09-28T09:24:54.1646089Z Get:38 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Components [212 B]
+2025-09-28T09:24:54.1657953Z Get:39 http://azure.archive.ubuntu.com/ubuntu noble-security/multiverse amd64 Components [208 B]
+2025-09-28T09:25:05.8610198Z Fetched 11.9 MB in 2s (7744 kB/s)
+2025-09-28T09:25:06.5554322Z Reading package lists...
+2025-09-28T09:25:06.5877361Z Reading package lists...
+2025-09-28T09:25:06.7290400Z Building dependency tree...
+2025-09-28T09:25:06.7297702Z Reading state information...
+2025-09-28T09:25:06.7452007Z E: Unable to locate package include-what-you-use
+2025-09-28T09:25:06.7483943Z ##[error]Process completed with exit code 100.

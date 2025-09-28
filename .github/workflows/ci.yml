@@ -12,7 +12,11 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy include-what-you-use xvfb
+          sudo apt-get install -y meson ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy xvfb
+      - name: (Optional) Install IWYU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y include-what-you-use || sudo apt-get install -y iwyu || true
       - name: Configure (C23, Werror)
         run: meson setup builddir -D c_std=c23 -D werror=true
       - name: Build
@@ -25,4 +29,3 @@ jobs:
         run: ./scripts/iwyu.sh || true
       - name: Full tests under Xvfb (optional)
         run: xvfb-run -s "-screen 0 1024x768x24" meson test -C builddir --print-errorlogs || true
-

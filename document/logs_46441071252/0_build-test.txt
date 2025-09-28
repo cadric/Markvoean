@@ -1,0 +1,162 @@
+﻿2025-09-28T09:24:51.6761922Z Current runner version: '2.328.0'
+2025-09-28T09:24:51.6784444Z ##[group]Runner Image Provisioner
+2025-09-28T09:24:51.6785243Z Hosted Compute Agent
+2025-09-28T09:24:51.6785741Z Version: 20250912.392
+2025-09-28T09:24:51.6786447Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+2025-09-28T09:24:51.6787103Z Build Date: 2025-09-12T15:23:14Z
+2025-09-28T09:24:51.6787670Z ##[endgroup]
+2025-09-28T09:24:51.6788301Z ##[group]Operating System
+2025-09-28T09:24:51.6788832Z Ubuntu
+2025-09-28T09:24:51.6789465Z 24.04.3
+2025-09-28T09:24:51.6789979Z LTS
+2025-09-28T09:24:51.6790439Z ##[endgroup]
+2025-09-28T09:24:51.6790891Z ##[group]Runner Image
+2025-09-28T09:24:51.6791497Z Image: ubuntu-24.04
+2025-09-28T09:24:51.6791964Z Version: 20250922.53.1
+2025-09-28T09:24:51.6792975Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250922.53/images/ubuntu/Ubuntu2404-Readme.md
+2025-09-28T09:24:51.6794601Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250922.53
+2025-09-28T09:24:51.6795608Z ##[endgroup]
+2025-09-28T09:24:51.6796731Z ##[group]GITHUB_TOKEN Permissions
+2025-09-28T09:24:51.6798704Z Contents: read
+2025-09-28T09:24:51.6799474Z Metadata: read
+2025-09-28T09:24:51.6800011Z Packages: read
+2025-09-28T09:24:51.6800466Z ##[endgroup]
+2025-09-28T09:24:51.6802460Z Secret source: Actions
+2025-09-28T09:24:51.6803121Z Prepare workflow directory
+2025-09-28T09:24:51.7113540Z Prepare all required actions
+2025-09-28T09:24:51.7160270Z Getting action download info
+2025-09-28T09:24:52.1381621Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-09-28T09:24:52.3691611Z Complete job name: build-test
+2025-09-28T09:24:52.4437256Z ##[group]Run actions/checkout@v4
+2025-09-28T09:24:52.4438382Z with:
+2025-09-28T09:24:52.4438780Z   repository: cadric/Markvoean
+2025-09-28T09:24:52.4439655Z   token: ***
+2025-09-28T09:24:52.4440060Z   ssh-strict: true
+2025-09-28T09:24:52.4440448Z   ssh-user: git
+2025-09-28T09:24:52.4440850Z   persist-credentials: true
+2025-09-28T09:24:52.4441310Z   clean: true
+2025-09-28T09:24:52.4441712Z   sparse-checkout-cone-mode: true
+2025-09-28T09:24:52.4442183Z   fetch-depth: 1
+2025-09-28T09:24:52.4442567Z   fetch-tags: false
+2025-09-28T09:24:52.4442964Z   show-progress: true
+2025-09-28T09:24:52.4443363Z   lfs: false
+2025-09-28T09:24:52.4443717Z   submodules: false
+2025-09-28T09:24:52.4444114Z   set-safe-directory: true
+2025-09-28T09:24:52.4444868Z ##[endgroup]
+2025-09-28T09:24:52.5493973Z Syncing repository: cadric/Markvoean
+2025-09-28T09:24:52.5495829Z ##[group]Getting Git version info
+2025-09-28T09:24:52.5496580Z Working directory is '/home/runner/work/Markvoean/Markvoean'
+2025-09-28T09:24:52.5497648Z [command]/usr/bin/git version
+2025-09-28T09:24:52.5565177Z git version 2.51.0
+2025-09-28T09:24:52.5590811Z ##[endgroup]
+2025-09-28T09:24:52.5612594Z Temporarily overriding HOME='/home/runner/work/_temp/1e0a3391-49be-4937-a8f7-a8e06e8c875b' before making global git config changes
+2025-09-28T09:24:52.5614842Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-28T09:24:52.5617279Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Markvoean/Markvoean
+2025-09-28T09:24:52.5652068Z Deleting the contents of '/home/runner/work/Markvoean/Markvoean'
+2025-09-28T09:24:52.5655527Z ##[group]Initializing the repository
+2025-09-28T09:24:52.5659171Z [command]/usr/bin/git init /home/runner/work/Markvoean/Markvoean
+2025-09-28T09:24:52.5756880Z hint: Using 'master' as the name for the initial branch. This default branch name
+2025-09-28T09:24:52.5758049Z hint: is subject to change. To configure the initial branch name to use in all
+2025-09-28T09:24:52.5758917Z hint: of your new repositories, which will suppress this warning, call:
+2025-09-28T09:24:52.5759733Z hint:
+2025-09-28T09:24:52.5760195Z hint: 	git config --global init.defaultBranch <name>
+2025-09-28T09:24:52.5760987Z hint:
+2025-09-28T09:24:52.5761845Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2025-09-28T09:24:52.5763008Z hint: 'development'. The just-created branch can be renamed via this command:
+2025-09-28T09:24:52.5763706Z hint:
+2025-09-28T09:24:52.5764081Z hint: 	git branch -m <name>
+2025-09-28T09:24:52.5764518Z hint:
+2025-09-28T09:24:52.5765080Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2025-09-28T09:24:52.5766283Z Initialized empty Git repository in /home/runner/work/Markvoean/Markvoean/.git/
+2025-09-28T09:24:52.5771886Z [command]/usr/bin/git remote add origin https://github.com/cadric/Markvoean
+2025-09-28T09:24:52.5807762Z ##[endgroup]
+2025-09-28T09:24:52.5808953Z ##[group]Disabling automatic garbage collection
+2025-09-28T09:24:52.5812758Z [command]/usr/bin/git config --local gc.auto 0
+2025-09-28T09:24:52.5841094Z ##[endgroup]
+2025-09-28T09:24:52.5842291Z ##[group]Setting up auth
+2025-09-28T09:24:52.5848329Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-09-28T09:24:52.5878742Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-09-28T09:24:52.6192216Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-28T09:24:52.6221773Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-09-28T09:24:52.6436835Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2025-09-28T09:24:52.6472462Z ##[endgroup]
+2025-09-28T09:24:52.6488094Z ##[group]Fetching the repository
+2025-09-28T09:24:52.6490509Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +f130062eb8f802f3ca74f1607728de55679b7d17:refs/remotes/origin/dev
+2025-09-28T09:24:53.4240660Z From https://github.com/cadric/Markvoean
+2025-09-28T09:24:53.4243463Z  * [new ref]         f130062eb8f802f3ca74f1607728de55679b7d17 -> origin/dev
+2025-09-28T09:24:53.4274886Z ##[endgroup]
+2025-09-28T09:24:53.4275715Z ##[group]Determining the checkout info
+2025-09-28T09:24:53.4276881Z ##[endgroup]
+2025-09-28T09:24:53.4282953Z [command]/usr/bin/git sparse-checkout disable
+2025-09-28T09:24:53.4323448Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2025-09-28T09:24:53.4351070Z ##[group]Checking out the ref
+2025-09-28T09:24:53.4355162Z [command]/usr/bin/git checkout --progress --force -B dev refs/remotes/origin/dev
+2025-09-28T09:24:53.4490479Z Switched to a new branch 'dev'
+2025-09-28T09:24:53.4493541Z branch 'dev' set up to track 'origin/dev'.
+2025-09-28T09:24:53.4500179Z ##[endgroup]
+2025-09-28T09:24:53.4532817Z [command]/usr/bin/git log -1 --format=%H
+2025-09-28T09:24:53.4554309Z f130062eb8f802f3ca74f1607728de55679b7d17
+2025-09-28T09:24:53.4756825Z ##[group]Run sudo apt-get update
+2025-09-28T09:24:53.4757744Z [36;1msudo apt-get update[0m
+2025-09-28T09:24:53.4760481Z [36;1msudo apt-get install -y meson ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy include-what-you-use xvfb[0m
+2025-09-28T09:24:53.4799030Z shell: /usr/bin/bash -e {0}
+2025-09-28T09:24:53.4800134Z ##[endgroup]
+2025-09-28T09:24:53.6401615Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2025-09-28T09:24:53.6821477Z Hit:6 https://packages.microsoft.com/repos/azure-cli noble InRelease
+2025-09-28T09:24:53.6825779Z Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+2025-09-28T09:24:53.6829041Z Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+2025-09-28T09:24:53.6893481Z Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+2025-09-28T09:24:53.6993502Z Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+2025-09-28T09:24:53.7086959Z Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+2025-09-28T09:24:53.9453771Z Get:8 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [39.5 kB]
+2025-09-28T09:24:53.9663115Z Get:9 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [57.1 kB]
+2025-09-28T09:24:53.9825518Z Get:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1443 kB]
+2025-09-28T09:24:53.9910992Z Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [282 kB]
+2025-09-28T09:24:53.9934118Z Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [175 kB]
+2025-09-28T09:24:53.9952635Z Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 c-n-f Metadata [15.3 kB]
+2025-09-28T09:24:53.9966173Z Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1485 kB]
+2025-09-28T09:24:54.0055588Z Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [299 kB]
+2025-09-28T09:24:54.0084569Z Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [377 kB]
+2025-09-28T09:24:54.0186898Z Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 c-n-f Metadata [31.0 kB]
+2025-09-28T09:24:54.0206788Z Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1957 kB]
+2025-09-28T09:24:54.0301393Z Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [441 kB]
+2025-09-28T09:24:54.0802221Z Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Components [212 B]
+2025-09-28T09:24:54.0812057Z Get:21 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+2025-09-28T09:24:54.0855919Z Get:22 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [7068 B]
+2025-09-28T09:24:54.0857877Z Get:23 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [28.9 kB]
+2025-09-28T09:24:54.0860465Z Get:24 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [11.0 kB]
+2025-09-28T09:24:54.0862393Z Get:25 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 c-n-f Metadata [1444 B]
+2025-09-28T09:24:54.0864336Z Get:26 http://azure.archive.ubuntu.com/ubuntu noble-backports/restricted amd64 Components [216 B]
+2025-09-28T09:24:54.0873082Z Get:27 http://azure.archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Components [212 B]
+2025-09-28T09:24:54.0887783Z Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [1171 kB]
+2025-09-28T09:24:54.0950562Z Get:29 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [198 kB]
+2025-09-28T09:24:54.0968890Z Get:30 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [21.6 kB]
+2025-09-28T09:24:54.0980268Z Get:31 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 c-n-f Metadata [8744 B]
+2025-09-28T09:24:54.0992510Z Get:32 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [880 kB]
+2025-09-28T09:24:54.1043239Z Get:33 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [195 kB]
+2025-09-28T09:24:54.1503399Z Get:34 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [52.2 kB]
+2025-09-28T09:24:54.1516660Z Get:35 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 c-n-f Metadata [18.0 kB]
+2025-09-28T09:24:54.1531988Z Get:36 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1872 kB]
+2025-09-28T09:24:54.1619736Z Get:37 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [423 kB]
+2025-09-28T09:24:54.1646108Z Get:38 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Components [212 B]
+2025-09-28T09:24:54.1657973Z Get:39 http://azure.archive.ubuntu.com/ubuntu noble-security/multiverse amd64 Components [208 B]
+2025-09-28T09:25:05.8610378Z Fetched 11.9 MB in 2s (7744 kB/s)
+2025-09-28T09:25:06.5554356Z Reading package lists...
+2025-09-28T09:25:06.5877408Z Reading package lists...
+2025-09-28T09:25:06.7290438Z Building dependency tree...
+2025-09-28T09:25:06.7297715Z Reading state information...
+2025-09-28T09:25:06.7452026Z E: Unable to locate package include-what-you-use
+2025-09-28T09:25:06.7483957Z ##[error]Process completed with exit code 100.
+2025-09-28T09:25:06.7604052Z Post job cleanup.
+2025-09-28T09:25:06.8520922Z [command]/usr/bin/git version
+2025-09-28T09:25:06.8555568Z git version 2.51.0
+2025-09-28T09:25:06.8596663Z Temporarily overriding HOME='/home/runner/work/_temp/c9bc2cb8-c19c-48e0-a1b9-23f130bfdc93' before making global git config changes
+2025-09-28T09:25:06.8597894Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-28T09:25:06.8602344Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Markvoean/Markvoean
+2025-09-28T09:25:06.8636984Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-09-28T09:25:06.8668822Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-09-28T09:25:06.8890794Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-28T09:25:06.8911262Z http.https://github.com/.extraheader
+2025-09-28T09:25:06.8923916Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2025-09-28T09:25:06.8952836Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-09-28T09:25:06.9268875Z Cleaning up orphan processes
