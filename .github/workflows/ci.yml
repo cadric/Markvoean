@@ -9,10 +9,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install deps
+      - name: Install system deps (no Meson)
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy xvfb
+          sudo apt-get install -y ninja-build pkg-config libgtk-4-dev libadwaita-1-dev libcmark-dev libsoup-3.0-dev clang-tidy xvfb
+      - name: Install Meson >= 1.7.2 (pip user)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --user "meson>=1.7.2"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          meson --version
       - name: (Optional) Install IWYU
         run: |
           sudo apt-get update
