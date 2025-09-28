@@ -1,5 +1,0 @@
-if:
-  - src/editor/buffer_manager.c
-  - src/render/markdown/cmrender.c
-  - src/render/visual/theme_styles.c
-  - src/ui/event_handlers.c

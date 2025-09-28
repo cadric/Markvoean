@@ -1,3 +1,4 @@
+<!-- moved: docs/FUTURE_PROMPTS.md (2025-09-28) -->
 # Future Implementation Prompts
 
 This file contains detailed prompts for future features and improvements that we want to implement later. Each prompt includes status tracking of what's been done vs. what remains.

@@ -13,56 +13,42 @@ A simple text editor with Markdown support built with GTK4 and libadwaita.
 
 ## Quick Start
 
-### Installing Dependencies
+### 1) Install dependencies
 
-Run the dependency installation script:
+Use the helper script (detects your distro, installs dev packages, ninja, and ensures Meson ≥ 1.7.2):
 
 ```bash
 ./scripts/install-deps.sh
+# If Meson was installed via pip (user), ensure ~/.local/bin is on PATH
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### Building
-
-#### Quick Development Workflow
+### 2) Build
 
 ```bash
-# Build, test, and run in one command
-./build-and-run.sh
-
-# Or use separate scripts:
-./build.sh          # Just build
-./run.sh            # Just run (after building)
-```
-
-#### Manual Build Commands
-
-```bash
-# Set up build directory (first time only)
-meson setup builddir
-
-# Build
+meson setup builddir -D c_std=c23
 meson compile -C builddir
-
-# Run tests
-meson test -C builddir
-
-# Run application
-GSETTINGS_SCHEMA_DIR=./data ./builddir/src/gtktext
 ```
 
-# Run the application
-./bin/gtktext
-```
-
-### Running Tests
+### 3) Test
 
 ```bash
-meson test -C builddir
+# Full test suite (requires a display)
+meson test -C builddir --print-errorlogs
+
+# Headless-friendly (uses Xvfb if available or runs data-only)
+./scripts/test-headless.sh
+```
+
+### 4) Run
+
+```bash
+# Ensure GSettings schema path is set
+GSETTINGS_SCHEMA_DIR=./data ./builddir/src/gtktext
 ```
 
 ## Project Structure
 
-```
 ```
 .
 ├── include/gtktext/         # Public headers (installed)
@@ -91,6 +77,13 @@ meson test -C builddir
 ├── run.sh                   # Run helper
 └── README.md
 ```
+
+## Documentation
+
+- Repo layout: docs/REPO_LAYOUT.md
+- Architecture: docs/ARCHITECTURE.md
+- Contributing: docs/CONTRIBUTING.md
+- Test docs/examples: docs/tests/
 
 ## Contributing
 

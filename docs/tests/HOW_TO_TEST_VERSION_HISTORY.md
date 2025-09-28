@@ -1,3 +1,4 @@
+<!-- moved: docs/tests/HOW_TO_TEST_VERSION_HISTORY.md (2025-09-28) -->
 # How to Test Version History
 
 ## 🎯 Quick Test

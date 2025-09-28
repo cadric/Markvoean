@@ -1,3 +1,4 @@
+<!-- moved: docs/CLAUDE.md (2025-09-28) -->
 ## 📋 PRE‑EDIT CHECKLIST
 
 **Mandatory before any change**

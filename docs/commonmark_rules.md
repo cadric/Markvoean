@@ -1,3 +1,4 @@
+<!-- moved: docs/commonmark_rules.md (2025-09-28) -->
 # CommonMark Rendering Rules (for Coding LLMs & Copilot integration)
 
 ## 1. Supported Markdown Elements
