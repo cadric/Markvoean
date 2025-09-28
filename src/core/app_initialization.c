@@ -141,6 +141,7 @@ void app_initialization_activate(GApplication *application)
     /* Phase 5: Get status bar widgets - restored for tab-based UI */
     GtkWidget *save_status = GTK_WIDGET(gtk_builder_get_object(builder, "save_status"));
     GtkWidget *file_location = GTK_WIDGET(gtk_builder_get_object(builder, "file_location"));
+    GtkWidget *recovery_banner = GTK_WIDGET(gtk_builder_get_object(builder, "recovery_banner"));
 
     /* Store status bar widgets for access by status manager */
     if (save_status) {
@@ -148,6 +149,9 @@ void app_initialization_activate(GApplication *application)
     }
     if (file_location) {
         g_object_set_data(G_OBJECT(app), "file_location", file_location);
+    }
+    if (recovery_banner) {
+        g_object_set_data(G_OBJECT(app), "recovery_banner", recovery_banner);
     }
 
 

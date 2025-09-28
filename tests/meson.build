@@ -28,6 +28,7 @@ lib_sources = [
   '../src/core/window_lifecycle.c',
   '../src/document/document.c',
   '../src/document/document_manager.c',
+  '../src/document/document_portal.c',
   '../src/document/atomic_io.c',
   '../src/document/fs_utils.c',
   '../src/document/version_history.c',

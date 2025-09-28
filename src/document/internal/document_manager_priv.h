@@ -30,6 +30,9 @@ struct _GtktextDocumentManager {
   guint        recovery_id;        /* recovery snapshot timer source ID */
   guint        debounce_id;        /* buffer change debounce timer source ID */
   gboolean     autosave_in_progress; /* flag to prevent concurrent autosave operations */
+  gboolean     recovery_write_in_progress; /* async recovery snapshot in flight */
+  gchar       *document_portal_uri;    /* portal-exported URI (document://) */
+  gchar       *document_handle;    /* portal handle for persistence */
   GFileMonitor *file_monitor;      /* ref - file change monitor */
   GSettings    *settings;          /* ref - app settings for autosave control */
 
@@ -41,4 +44,3 @@ struct _GtktextDocumentManager {
   gulong  buffer_changed_handler_id;
   gchar  *original_content;        /* owned - content at last save */
 };
-

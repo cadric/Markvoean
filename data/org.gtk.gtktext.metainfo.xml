@@ -83,6 +83,25 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="2.5.16" date="2025-09-28">
+      <description>
+        <p>Version history and recovery refinements:</p>
+        <ul>
+          <li>WYSIWYG view now re-renders restored versions immediately instead of showing raw markdown.</li>
+          <li>Crash recovery snapshots are written asynchronously to the XDG state directory, preparing for sandbox-friendly autosave.</li>
+          <li>A new in-app banner highlights available autosaves and launches the recovery browser in one click.</li>
+          <li>Saving documents inside a sandbox now negotiates access through the Documents portal automatically.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="2.5.15" date="2025-09-28">
+      <description>
+        <p>Stability improvement for version history workflows:</p>
+        <ul>
+          <li>Fixed a crash when restoring or closing the Version History dialog by tightening widget lifetime management.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.3" date="2025-09-18">
       <description>
         <p>Critical data protection and GNOME compliance improvements:</p>

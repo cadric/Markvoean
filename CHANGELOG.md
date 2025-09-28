@@ -17,6 +17,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This transformation provides a solid foundation for future development and collaborative work.
 
+## [2.5.16] - 2025-09-28
+
+### Fixed
+- Restoring a saved version now re-renders the WYSIWYG editor immediately, so you no longer see raw markdown after using Version History.
+
+### Changed
+- Crash recovery snapshots now write asynchronously to the XDG state directory, preparing the autosave pipeline for portal integration.
+- Startup now surfaces autosave availability via a non-modal in-window banner with a shortcut to the recovery browser.
+- When opening or saving files inside a sandbox, IFG now requests `org.freedesktop.portal.Documents` access so repeated saves work without extra prompts.
+
+## [2.5.15] - 2025-09-28
+
+### Fixed
+- Prevented version history dialogs from freeing their state twice, eliminating the crash after restoring or closing a snapshot dialog.
+
+## [2.5.14] - 2025-09-28
+
+### Added
+- Manual "Save Version…" action in the app menu (creates a snapshot on demand).
+- Rich-text formatting shortcuts:
+  - Ctrl+B toggles bold (app.format-bold)
+  - Ctrl+I toggles italic (app.format-italic)
+
+### Docs
+- Updated `docs/FUTURE_PROMPTS.md` to mark completed items (manual save version, bold/italic shortcuts).
+
 ## [2.5.13] - 2025-09-28
 
 ### Hardening & Docs (Phase 6)

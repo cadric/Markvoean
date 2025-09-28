@@ -8,7 +8,7 @@ This file contains detailed prompts for future features and improvements that we
 ## Version History and Crash Restore - Comprehensive Implementation
 
 **Status:** 🟡 Partially Implemented
-- ✅ **Done:** Basic version saving on document save, GSettings preferences, menu integration, file-based storage
+- ✅ **Done:** Basic version saving on document save, GSettings preferences, menu integration, file-based storage, WYSIWYG restores render immediately
 - ❌ **Not Done:** Crash recovery, proper XDG directories, compression, metadata tracking, retention policies, atomic saves, ETag validation, diff/preview, manual snapshots
 
 **Original Prompt:**
@@ -18,13 +18,14 @@ You are implementing **Version History** and **Crash Restore** in a GTK4 text ed
 
 * **Version History**
   * Automatic checkpoints on explicit save. ✅ *Basic implementation exists*
-  * Optional manual "Save version…" snapshots. ❌
+  * Optional manual "Save version…" snapshots. ✅ (Menu: Save Version…)
   * Immutable, read-only previews. ❌
   * Allow diff against current, restore as new file, or revert with undo safety net. ❌
   * Timeline per-document, persists across sessions. ✅ *Basic implementation exists*
   * Retention policy: keep recent dense, older sparse. ❌
   * Store in `$XDG_DATA_HOME/<app-id>/versions/` as compressed whole snapshots (e.g. zstd). ❌ *Currently uses ~/.cache/gtktext/versions/ uncompressed*
   * Metadata in SQLite or JSON: doc-uri, etag, mtime, size, content-hash, label, created_at. ❌ *Currently uses basic GKeyFile format*
+  * Restore paths re-render Markdown automatically in WYSIWYG mode. ✅
 
 * **Crash Restore**
   * Autosave after 5s idle or 30s max interval. ❌
@@ -90,8 +91,8 @@ General (document):
 * Ctrl+H → Replace ❌
 
 Text formatting → emit CommonMark:
-* Ctrl+B → Bold → wrap selection with \*\* \*\* (toggle) ❌
-* Ctrl+I → Italic → wrap selection with \* \* (toggle) ❌
+* Ctrl+B → Bold → wrap selection with \*\* \*\* (toggle) ✅ (Action: app.format-bold)
+* Ctrl+I → Italic → wrap selection with \* \* (toggle) ✅ (Action: app.format-italic)
 * Ctrl+K → Insert/edit link → [text](url) (open dialog if selection empty) ❌
 * Ctrl+Shift+I → Insert image → ![alt](url) ❌
 * Ctrl+`→ Inline code → wrap with` \` (toggle) ❌
@@ -152,6 +153,50 @@ References:
 - Missing: All rich-text formatting, navigation, standard text editing, dual redo support
 - Would need new action system for formatting commands
 - Command palette not implemented
+
+---
+
+## Crash Recovery Modernization (Autosave Portals & XDG State)
+
+**Status:** 🔴 Not Started
+- ✅ **Done:** Legacy autosave timer writes drafts/recovery snapshots to cache, version restores re-render WYSIWYG immediately
+- ❌ **Not Done:** Portal-backed autosave writes, `$XDG_STATE_HOME` storage, asynchronous writes with rollback, recovery banner UX, portal permissions workflow
+
+**Original Prompt:**
+Upgrade crash recovery to use the GNOME portals and State directory so autosave snapshots are persistent, sandbox-safe, and user-friendly.
+
+**Requirements:**
+
+* **Storage Layout**
+  * ✅ Move recovery snapshots to `$XDG_STATE_HOME/org.gtk.gtktext/recovery/` with 0700 perms.
+  * ❌ Use content hashing + document URIs to avoid collisions; store metadata as JSON (path, etag, mtime, hash, created_at, label).
+  * ❌ Compress payloads (zstd) and rotate according to retention policy (keep last 5 autosaves per document).
+
+* **Portal Integration**
+  * ✅ Use `org.freedesktop.portal.Documents` to request write access when the document is outside sandbox permissions.
+  * ✅ Write recovery files via `g_file_replace_contents_async` with rollback on failure; surface errors in status bar.
+
+* **Autosave Scheduler**
+  * Switch to adaptive interval (idle debounce + hard cap) with `GFileMonitor` awareness.
+  * Skip autosave when buffer hasn’t changed since last snapshot (compare checksum/etag).
+
+* **Recovery UX**
+  * ✅ Present a non-modal banner on startup when autosaves exist, offering “Review…” via the recovery browser.
+  * ❌ Provide diff preview vs last saved (ties into future diff feature when available).
+
+* **Testing & Telemetry**
+  * Add GLib tests that simulate portal failure, permission denial, and concurrent saves.
+  * Verify cleanup of obsolete snapshots on successful exit.
+
+**Deliverables:**
+* Portal-aware autosave pipeline in `src/document/document_manager.c` (async APIs + retention helper).
+* JSON metadata helpers in a new `recovery_metadata.c` module with unit tests under `tests/`.
+* UI banner and recovery chooser updates in `src/ui/dialogs/dialogs.c` and GtkBuilder files.
+
+**Implementation Notes:**
+- Coordinate with existing draft/recovery helpers; consider merging into unified “state storage” module.
+- Persist portal-granted permissions to avoid repeated prompts during a session.
+- Ensure all new async operations marshal back to the main loop before touching UI.
 
 ---
 

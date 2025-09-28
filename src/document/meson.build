@@ -7,6 +7,7 @@ document_sources = []
 document_sources += files(
   'document.c',
   'document_manager.c',
+  'document_portal.c',
   'fs_utils.c',
   'atomic_io.c',
   'recovery_drafts.c',

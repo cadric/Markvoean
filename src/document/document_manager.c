@@ -13,6 +13,7 @@
 #include <gtktext/document/doc_state.h>
 #include "internal/document_manager_priv.h"
 #include "internal/recovery_priv.h"
+#include <gtktext/document/document_portal.h>
 #include <gtktext/render/cmrender.h>
 #include <gtktext/render/theme_styles.h>
 #include <gtktext/render/markdown/markdown_engine.h>
@@ -23,6 +24,9 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gio/gio.h>
+#ifdef HAVE_LIBSOUP
+#include <libsoup/soup.h>
+#endif
 #include <glib/gstdio.h>
 #include <glib/gi18n.h>
 #include <sys/stat.h>
@@ -33,6 +37,39 @@
 #ifdef G_OS_WIN32
 #include <windows.h>
 #endif
+
+/* Idle callback used to mark document dirty after restore without re-entrancy */
+static gboolean idle_mark_dirty_cb(gpointer u)
+{
+    DocumentManager *idm = GTKTEXT_DOCUMENT_MANAGER(u);
+    doc_on_user_mutation(&idm->doc_state);
+    g_object_unref(idm);
+    return G_SOURCE_REMOVE;
+}
+
+static void document_manager_refresh_portal_uri(DocumentManager *dm)
+{
+    g_return_if_fail(dm != NULL);
+
+    g_clear_pointer(&dm->document_portal_uri, g_free);
+
+    if (!dm->file_path) {
+        return;
+    }
+
+    GError *portal_error = NULL;
+    gchar *uri = document_portal_export_path(dm->file_path, &portal_error);
+    if (uri) {
+        dm->document_portal_uri = uri;
+        g_debug("Portal exported document: %s -> %s", dm->file_path, uri);
+    } else {
+        if (portal_error) {
+            g_debug("Document portal export failed for %s: %s",
+                    dm->file_path, portal_error->message);
+            g_clear_error(&portal_error);
+        }
+    }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * TYPES - Internal type definitions
@@ -112,6 +149,7 @@ static void gtktext_document_manager_finalize(GObject *object)
     g_clear_pointer(&dm->recovery_path, g_free);
     g_clear_pointer(&dm->last_hash, g_free);
     g_clear_pointer(&dm->original_content, g_free);
+    g_clear_pointer(&dm->document_portal_uri, g_free);
 
     G_OBJECT_CLASS(gtktext_document_manager_parent_class)->finalize(object);
 }
@@ -231,53 +269,119 @@ static gchar* create_draft_file(const gchar *content, GError **error)
 
 /* Recovery System - Crash recovery and data protection */
 
-/* Write a recovery snapshot with metadata */
-static void write_recovery_snapshot(DocumentManager *dm)
+typedef struct {
+    GtktextDocumentManager *dm;
+    gchar *path;
+    GBytes *bytes;
+    GFile *file;
+} RecoveryWriteJob;
+
+static void recovery_write_job_free(RecoveryWriteJob *job)
 {
-    g_return_if_fail(dm != NULL);
-    g_return_if_fail(dm->buffer != NULL);
-    
-    /* Get current content */
+    if (!job) return;
+    g_clear_object(&job->file);
+    if (job->bytes) {
+        g_bytes_unref(job->bytes);
+    }
+    if (job->dm) {
+        g_object_unref(job->dm);
+    }
+    g_clear_pointer(&job->path, g_free);
+    g_free(job);
+}
+
+static void on_recovery_snapshot_written(GObject *source_object,
+                                         GAsyncResult *result,
+                                         gpointer user_data)
+{
+    RecoveryWriteJob *job = user_data;
+    GFile *file = G_FILE(source_object);
+    GError *error = NULL;
+
+    gboolean ok = g_file_replace_contents_finish(file, result, NULL, &error);
+
+    GtktextDocumentManager *dm = job->dm;
+    dm->recovery_write_in_progress = FALSE;
+
+    if (!ok) {
+        g_warning("Failed to write recovery snapshot: %s",
+                  error ? error->message : "unknown error");
+        g_clear_error(&error);
+        recovery_write_job_free(job);
+        return;
+    }
+
+    g_free(dm->recovery_path);
+    dm->recovery_path = g_strdup(job->path);
+    g_debug("Recovery snapshot written: %s", job->path);
+
+    recovery_write_job_free(job);
+}
+
+static gboolean write_recovery_snapshot_async(GtktextDocumentManager *dm)
+{
+    g_return_val_if_fail(dm != NULL, FALSE);
+    g_return_val_if_fail(dm->buffer != NULL, FALSE);
+
+    if (dm->recovery_write_in_progress) {
+        return FALSE;
+    }
+
     g_autofree gchar *content = get_buffer_content_as_markdown(dm->buffer);
-    if (!content) return;
-    
-    /* Skip empty content to avoid cluttering recovery directory */
-    if (g_utf8_strlen(content, -1) == 0) return;
-    
-    /* Generate recovery filename with timestamp */
+    if (!content) {
+        return FALSE;
+    }
+
+    if (g_utf8_strlen(content, -1) == 0) {
+        return FALSE;
+    }
+
     g_autoptr(GDateTime) now = g_date_time_new_now_local();
     g_autofree gchar *timestamp = g_date_time_format(now, "%Y%m%d-%H%M%S");
-    g_autofree gchar *basename = dm->file_path ? 
+    g_autofree gchar *basename = dm->file_path ?
         g_path_get_basename(dm->file_path) : g_strdup("untitled");
-    
+
     g_autofree gchar *recovery_dir = get_recovery_directory();
-    g_autofree gchar *filename = g_strdup_printf("%s-%s.recovery", 
+    g_autofree gchar *filename = g_strdup_printf("%s-%s.recovery",
                                                  basename, timestamp);
-    g_autofree gchar *path = g_build_filename(recovery_dir, filename, NULL);
-    
-    /* Write recovery file with metadata */
+    gchar *path = g_build_filename(recovery_dir, filename, NULL);
+
     g_autoptr(GKeyFile) metadata = g_key_file_new();
-    g_key_file_set_string(metadata, "Recovery", "OriginalPath", 
+    g_key_file_set_string(metadata, "Recovery", "OriginalPath",
                           dm->file_path ? dm->file_path : "");
-    g_key_file_set_int64(metadata, "Recovery", "Timestamp", 
+    g_key_file_set_int64(metadata, "Recovery", "Timestamp",
                          g_date_time_to_unix(now));
     g_key_file_set_string(metadata, "Recovery", "Content", content);
     g_key_file_set_boolean(metadata, "Recovery", "IsUntitled", dm->is_untitled);
-    g_key_file_set_string(metadata, "Recovery", "DraftPath", 
+    g_key_file_set_string(metadata, "Recovery", "DraftPath",
                           dm->draft_path ? dm->draft_path : "");
-    
-    g_autofree gchar *data = g_key_file_to_data(metadata, NULL, NULL);
-    g_autoptr(GError) error = NULL;
-    if (!g_file_set_contents(path, data, -1, &error)) {
-        g_warning("Failed to write recovery snapshot: %s", error->message);
-        return;
+
+    gsize data_len = 0;
+    gchar *data = g_key_file_to_data(metadata, &data_len, NULL);
+    if (!data) {
+        g_free(path);
+        return FALSE;
     }
-    
-    /* Update recovery path in document manager */
-    g_free(dm->recovery_path);
-    dm->recovery_path = g_strdup(path);
-    
-    g_debug("Recovery snapshot written: %s", path);
+
+    RecoveryWriteJob *job = g_new0(RecoveryWriteJob, 1);
+    job->dm = g_object_ref(dm);
+    job->path = g_strdup(path);
+    job->bytes = g_bytes_new_take((guchar *)data, data_len);
+    job->file = g_file_new_for_path(path);
+
+    dm->recovery_write_in_progress = TRUE;
+
+    g_file_replace_contents_bytes_async(job->file,
+                                        job->bytes,
+                                        NULL,
+                                        FALSE,
+                                        G_FILE_CREATE_NONE,
+                                        NULL,
+                                        on_recovery_snapshot_written,
+                                        job);
+
+    g_free(path);
+    return TRUE;
 }
 
 /* Recovery internals */
@@ -441,7 +545,9 @@ static gboolean recovery_timeout_cb(gpointer user_data)
     
     /* Write recovery snapshot if document has content and is dirty or draft */
     if (doc_is_dirty(&dm->doc_state)) {
-        write_recovery_snapshot(dm);
+        if (!write_recovery_snapshot_async(dm)) {
+            g_debug("Recovery snapshot skipped (no changes or write in progress)");
+        }
     }
     
     /* Periodically clean up old recovery files */
@@ -599,6 +705,8 @@ static void document_manager_open_async_complete(GObject *source_object, GAsyncR
     /* Clear any existing draft/recovery paths */
     g_clear_pointer(&dm->draft_path, g_free);
     g_clear_pointer(&dm->recovery_path, g_free);
+
+    document_manager_refresh_portal_uri(dm);
 
     /* Update file metadata */
     document_external_update_metadata(dm);
@@ -818,7 +926,12 @@ void document_manager_save_async(DocumentManager *dm, GCancellable *cancellable,
     }
 
     /* Start async file save */
-    GFile *file = g_file_new_for_path(dm->file_path);
+    GFile *file = NULL;
+    if (dm->document_portal_uri) {
+        file = g_file_new_for_uri(dm->document_portal_uri);
+    } else {
+        file = g_file_new_for_path(dm->file_path);
+    }
     gsize content_len = strlen(data->content);
 
     g_debug("save_async: content length = %zu, first 50 chars: [%.50s]",
@@ -851,6 +964,8 @@ void document_manager_save_as_async(DocumentManager *dm, const gchar *file_path,
     g_free(dm->file_path);
     dm->file_path = g_strdup(file_path);
     dm->is_untitled = FALSE;
+
+    document_manager_refresh_portal_uri(dm);
 
     /* Delegate to regular save_async */
     document_manager_save_async(dm, cancellable, callback, user_data);
@@ -1141,6 +1256,8 @@ gboolean document_manager_adopt_current_buffer(DocumentManager *dm, const gchar 
     /* Clear any existing draft/recovery paths */
     g_clear_pointer(&dm->draft_path, g_free);
     g_clear_pointer(&dm->recovery_path, g_free);
+
+    document_manager_refresh_portal_uri(dm);
 
     /* Update file metadata */
     document_external_update_metadata(dm);
@@ -1526,15 +1643,59 @@ gboolean document_manager_restore_from_version(DocumentManager *dm,
         return FALSE;
     }
 
-    /* Clear current buffer and insert version content */
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
-    gtk_text_buffer_delete(dm->buffer, &start, &end);
-    gtk_text_buffer_get_start_iter(dm->buffer, &start);
-    gtk_text_buffer_insert(dm->buffer, &start, content, -1);
+    /* Perform buffer replacement safely */
+    document_manager_block_buffer_signals(dm);
 
-    /* Mark as dirty so user can save if they want */
-    doc_on_user_mutation(&dm->doc_state);
+    GtkTextView *text_view = NULL;
+    gpointer view_data = g_object_get_data(G_OBJECT(dm->buffer), "gtktext-view");
+    if (view_data && GTK_IS_TEXT_VIEW(view_data)) {
+        text_view = GTK_TEXT_VIEW(view_data);
+    }
+#ifdef HAVE_LIBSOUP
+    SoupSession *soup_session = NULL;
+    gpointer soup_data = g_object_get_data(G_OBJECT(dm->buffer), "soup-session");
+    if (soup_data) {
+        soup_session = (SoupSession *)soup_data;
+    }
+#endif
+
+    gboolean rendered = FALSE;
+
+    /* Irreversible action to avoid building huge undo entries during restore */
+    gtk_text_buffer_begin_irreversible_action(dm->buffer);
+
+    if (text_view && GTK_IS_TEXT_VIEW(text_view)) {
+#ifdef HAVE_LIBSOUP
+        rendered = cm_render_markdown_to_buffer(dm->buffer, content, text_view, soup_session);
+#else
+        rendered = cm_render_markdown_to_buffer(dm->buffer, content, text_view, NULL);
+#endif
+        if (!rendered) {
+            g_warning("Falling back to plain restore - markdown render failed");
+        }
+    }
+
+    if (!rendered) {
+        GtkTextIter start, end;
+        render_set_suppress_reparse(dm->buffer, TRUE);
+        gtk_text_buffer_get_bounds(dm->buffer, &start, &end);
+        gtk_text_buffer_delete(dm->buffer, &start, &end);
+        gtk_text_buffer_get_start_iter(dm->buffer, &start);
+        gtk_text_buffer_insert(dm->buffer, &start, content, -1);
+        render_set_suppress_reparse(dm->buffer, FALSE);
+    }
+
+    gtk_text_buffer_end_irreversible_action(dm->buffer);
+
+    /* Update theme-dependent tags for consistency */
+    theme_styles_update_theme_dependent_tags(dm->buffer);
+
+    /* Unblock signals */
+    document_manager_unblock_buffer_signals(dm);
+
+    /* Mark as dirty after the main loop settles to avoid re-entrancy */
+    g_object_ref(dm);
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, idle_mark_dirty_cb, dm, NULL);
 
     g_debug("Document restored from version: %s", version_path);
     return TRUE;

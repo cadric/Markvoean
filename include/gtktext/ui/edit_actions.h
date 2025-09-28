@@ -20,6 +20,11 @@ G_BEGIN_DECLS
 void edit_action_undo_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void edit_action_redo_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 void edit_action_version_history_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+void edit_action_save_version_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+
+/* Formatting actions */
+void edit_action_format_bold_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+void edit_action_format_italic_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
 /* Standard text editing actions */
 void edit_action_cut_cb(GSimpleAction *action, GVariant *parameter, gpointer user_data);

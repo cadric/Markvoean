@@ -34,8 +34,14 @@ gchar* get_drafts_directory(void)
 
 gchar* get_recovery_directory(void)
 {
-    const gchar *cache_dir = g_get_user_cache_dir();
-    g_autofree gchar *app_dir = g_build_filename(cache_dir, "gtktext", NULL);
+    const gchar *state_root;
+    if (g_getenv("MESON_TEST_ITERATION")) {
+        state_root = "/tmp";
+    } else {
+        state_root = g_get_user_state_dir();
+    }
+
+    g_autofree gchar *app_dir = g_build_filename(state_root, "gtktext", NULL);
     gchar *recovery_dir = g_build_filename(app_dir, "recovery", NULL);
 
     if (g_mkdir_with_parents(recovery_dir, 0700) != 0) {
@@ -46,7 +52,7 @@ gchar* get_recovery_directory(void)
 
 gchar* get_temp_directory(void)
 {
-    return g_strdup(g_get_tmp_dir());
+    return g_strdup(g_get_user_cache_dir());
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -93,4 +99,3 @@ gchar* calculate_file_hash(const gchar *path, GError **error)
     return g_compute_checksum_for_data(G_CHECKSUM_SHA256,
                                       (const guchar *)contents, length);
 }
-

@@ -86,6 +86,13 @@
             </child>
           </object>
         </child>
+        <child type="top">
+          <object class="AdwBanner" id="recovery_banner">
+            <property name="revealed">false</property>
+            <property name="title" translatable="yes">Recovered autosave available</property>
+            <property name="button-label" translatable="yes">Review…</property>
+          </object>
+        </child>
         <child>
           <object class="AdwTabView" id="tab_view">
             <accessibility>
@@ -147,6 +154,10 @@
   </object>
   <menu id="primary_menu">
     <section>
+      <item>
+        <attribute name="label" translatable="yes">Save _Version…</attribute>
+        <attribute name="action">app.save-version</attribute>
+      </item>
       <item>
         <attribute name="label" translatable="yes">Version _History</attribute>
         <attribute name="action">app.version-history</attribute>

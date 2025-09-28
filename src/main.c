@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
 
     app = adw_application_new("org.gtk.gtktext", G_APPLICATION_HANDLES_OPEN);
 
-    const GActionEntry app_actions[] = {
+  const GActionEntry app_actions[] = {
         { "new-tab", tab_integration_new_tab_action, NULL, NULL, NULL, {0} },
         { "close-tab", tab_integration_close_tab_action, NULL, NULL, NULL, {0} },
         { "open", file_action_open_cb, NULL, NULL, NULL, {0} },
@@ -103,6 +103,9 @@ int main(int argc, char *argv[])
         { "undo", edit_action_undo_cb, NULL, NULL, NULL, {0} },
         { "redo", edit_action_redo_cb, NULL, NULL, NULL, {0} },
         { "version-history", edit_action_version_history_cb, NULL, NULL, NULL, {0} },
+        { "save-version", edit_action_save_version_cb, NULL, NULL, NULL, {0} },
+        { "format-bold", edit_action_format_bold_cb, NULL, NULL, NULL, {0} },
+        { "format-italic", edit_action_format_italic_cb, NULL, NULL, NULL, {0} },
         { "cut", edit_action_cut_cb, NULL, NULL, NULL, {0} },
         { "copy", edit_action_copy_cb, NULL, NULL, NULL, {0} },
         { "paste", edit_action_paste_cb, NULL, NULL, NULL, {0} },
@@ -125,6 +128,8 @@ int main(int argc, char *argv[])
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.open", (const char*[]){ "<primary>o", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save", (const char*[]){ "<primary>s", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.save-as", (const char*[]){ "<primary><shift>s", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.format-bold", (const char*[]){ "<primary>b", NULL });
+  gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.format-italic", (const char*[]){ "<primary>i", NULL });
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.print", (const char*[]){ "<primary>p", NULL });
   // Edit shortcuts
   gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.undo", (const char*[]){ "<primary>z", NULL });
